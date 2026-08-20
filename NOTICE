@@ -1,0 +1,42 @@
+roi-grasp — D405 + EXTRA Hand 자율 파지
+Copyright 2026 smoon7506
+
+This product includes software developed as part of the AmazingHand project
+(https://github.com/pollen-robotics/AmazingHand), licensed under the
+Apache License, Version 2.0.
+
+--------------------------------------------------------------------------
+AmazingHand 로부터 가져온 것
+--------------------------------------------------------------------------
+
+config/r_hand.toml
+    AmazingHand 의 Demo/AHControl/config/r_hand.toml 에서 가져왔다.
+    손가락 5개(모터 10개)의 ID 와 오프셋이 들어 있다.
+
+    변경 사항:
+      - 최상단에 `baudrate = 1000000` 한 줄을 추가했다.
+
+    이 값들은 upstream 기본값 그대로다. 손을 새로 조립했거나 서보를
+    교체했으면 실측해서 고쳐야 한다.
+
+--------------------------------------------------------------------------
+이 저장소에서 새로 쓴 것
+--------------------------------------------------------------------------
+
+detection/ 과 hand_control/ 아래의 파이썬 코드, docs/ 의 문서는 이
+저장소에서 새로 작성했다. AmazingHand 의 Rust 컨트롤러, dora 노드,
+MuJoCo 씬, GUI 는 포함하지 않는다.
+
+hand_control/kinematics.py 는 AmazingHand 하드웨어의 차동(differential)
+구조를 다루지만 구현은 독립적이다. hand_control/hand.py 의 주석 일부가
+AmazingHand 의 Rust 소스(get_zeros.rs, goto.rs)를 SCS0009 동작의 근거로
+인용한다.
+
+--------------------------------------------------------------------------
+포함하지 않은 제3자 소프트웨어
+--------------------------------------------------------------------------
+
+촉각 센서 SDK (Tashan capRead) 와 CH341 USB-I2C 드라이버 (WCH) 는 각
+제조사의 것이며 이 저장소에 포함하지 않는다. 센서와 함께 제공받은 것을
+사용하고 CAPREAD_DIR 환경변수로 경로를 지정한다. 그 소프트웨어에는
+이 저장소의 라이선스가 적용되지 않는다.

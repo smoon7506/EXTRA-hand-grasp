@@ -344,7 +344,13 @@ export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit
 
 ## 라이선스
 
-MIT — `LICENSE` 참고. 마음대로 쓰고 고치고 배포해도 된다. 출처만 밝혀 주면 된다.
+**Apache License 2.0** — `LICENSE` 참고. 쓰고 고치고 배포해도 된다.
+조건은 셋이다: 라이선스 사본을 같이 주고, 바꾼 파일에 바꿨다고 표시하고,
+저작권 표시를 지우지 않는다.
 
-단, 위의 벤더 SDK 는 이 라이선스가 적용되지 않는다. 그건 각 제조사의 조건을
-따른다.
+upstream 인 [AmazingHand](https://github.com/pollen-robotics/AmazingHand) 가
+Apache 2.0 이라 맞췄다. `config/r_hand.toml` 이 거기서 온 파일이고, 출처와
+변경 사항은 `NOTICE` 에 적혀 있다.
+
+**벤더 SDK(Tashan capRead, WCH CH341)에는 이 라이선스가 적용되지 않는다.**
+저장소에 포함하지 않았고, 각 제조사의 조건을 따른다.
