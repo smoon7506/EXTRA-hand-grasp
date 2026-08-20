@@ -38,34 +38,90 @@
 
 ## 설치
 
+**저장소 하나를 양쪽에 그대로 clone 한다.** 나누지 않는다 — `link.py` 는 양쪽이
+같은 파일이어야 하고, 한쪽만 고치면 통신이 깨진다. 전부 합쳐 187KB 라 쓰지 않는
+파일이 몇 개 같이 있어도 손해가 아니다.
+
 ```bash
 git clone <이 저장소> && cd roi-grasp
+```
+
+### 파이 (라즈베리파이 5)
+
+```bash
 python3 -m venv venv --system-site-packages && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-파이에서는 `pyrealsense2` 소스 빌드와 CH341 커널 모듈이 더 필요하다 —
+`pyrealsense2` 소스 빌드와 CH341 커널 모듈이 더 필요하다 —
 **`docs/pi-setup.md` 를 따라간다.** 거기 함정이 몇 개 있다.
 
-촉각 센서 SDK(Tashan capRead)는 이 저장소에 없다. 센서와 같이 받은 것을 쓴다.
-없으면 `--simple-grasp` 로 촉각 없이 돌릴 수 있다.
+촉각 센서 SDK(Tashan capRead)는 이 저장소에 없다. 센서와 같이 받은 것을 쓰고
+경로를 알려준다(`export CAPREAD_DIR=...`). 없으면 `--simple-grasp` 로 촉각 없이
+돌릴 수 있다.
+
+### PC (윈도우)
+
+```powershell
+python -m venv venv; .\venv\Scripts\activate
+pip install numpy opencv-python
+```
+
+**PC 에는 `pyrealsense2` 도 `rustypot` 도 필요 없다.** 카메라와 모터를 안 만진다.
+
+---
+
+## 어느 파일이 어디서 도나
+
+| 어디서 | 파일 |
+|---|---|
+| **파이에서만** | `detection/` — `grasp_daemon` `roi_judge` `orientation` `wrist_align` `grasp_state` `grasp_commands` `roi_grasp`<br>`hand_control/` — **전부**<br>`config/r_hand.toml` |
+| **PC 에서만** | `detection/` — `grasp_console` `console_input` |
+| **양쪽 공용** | `detection/` — `link` `link_sender` `roi_config` |
+
+`hand_control/` 은 통째로 파이 쪽이다. 모터와 촉각 센서를 만지는 코드라 PC 에는
+필요 없다.
+
+`link.py` 는 프로토콜이라 **양쪽이 같은 파일을 써야 한다.** 이것 하나 때문에
+저장소를 나누지 않는다.
+
+### 하드웨어는 전부 파이에 붙는다
+
+D405, URT-1(손+손목), 촉각 센서 모두 파이 USB 에 꽂는다. PC 에는 아무것도 안
+꽂는다 — 화면과 키보드만 쓴다.
 
 ---
 
 ## 실행
 
-```bash
-# 파이 (먼저)
-cd detection && python grasp_daemon.py
+터미널 두 개가 필요하다. **파이를 먼저 띄운다** — 콘솔이 클라이언트라 데몬이
+없으면 `ConnectionRefused` 로 바로 죽는다.
 
-# PC (그다음)
-cd detection && python grasp_console.py --host <파이IP>
+**터미널 1 — 파이 (SSH)**
+
+```bash
+source ~/venv/bin/activate
+cd ~/roi-grasp/detection
+python grasp_daemon.py
 ```
+
+창이 안 뜨는 게 정상이다. 화면은 PC 가 그린다.
+SSH 가 끊기면 데몬도 죽으니 오래 띄울 거면 `tmux` 를 쓴다.
+
+**터미널 2 — PC**
+
+```powershell
+cd roi-grasp\detection
+python grasp_console.py --host 192.168.137.236
+```
+
+여기서 영상 창이 뜬다. `--host` 는 파이 IP 다(기본값 `127.0.0.1` 은 같은 기계에서
+쓸 때만 맞다).
 
 붙으면 화면에 `DISARMED` 가 보인다. **`m` 을 눌러야 판정이 시작된다** —
 부팅하자마자 손이 알아서 잡으면 안 되기 때문이다.
 
-옵션: `--no-hand`(카메라만) `--no-wrist` `--simple-grasp`(촉각 대신 고정 자세)
+데몬 옵션: `--no-hand`(카메라만) `--no-wrist` `--simple-grasp`(촉각 대신 고정 자세)
 `--preview-fps` `--preview-scale`
 
 처음이면 **`docs/pi-run.md` 의 4단계 브링업**을 따라간다. 한 번에 다 붙이면
