@@ -207,8 +207,8 @@ ls /dev/ch34x_pis*         # 드라이버가 올라왔으면 여기 보인다
 ## 4. 코드 받기
 
 ```bash
-git clone https://github.com/smoon7506/grasp.git ~/grasp
-cd ~/grasp
+git clone https://github.com/smoon7506/EXTRA-hand-grasp.git ~/EXTRA-hand-grasp
+cd ~/EXTRA-hand-grasp
 ```
 
 비공개 저장소라 인증이 필요하다. 파이에는 브라우저가 없어서 PC 처럼 클릭 한
@@ -239,7 +239,7 @@ cat ~/.ssh/id_ed25519.pub
 에 붙인다(쓰기가 필요 없으면 Allow write access 는 체크하지 않는다). 그다음:
 
 ```bash
-git clone git@github.com:smoon7506/grasp.git ~/grasp
+git clone git@github.com:smoon7506/EXTRA-hand-grasp.git ~/EXTRA-hand-grasp
 ```
 
 이후 코드 갱신은 `git pull` 한 줄이면 된다.
@@ -263,8 +263,8 @@ git 을 거치지 않고 고친 파일만 보낼 수도 있다. 다만 **`.py` �
 날아간다.
 
 ```powershell
-scp detection\*.py <사용자>@<파이IP>:~/grasp/detection/
-scp hand_control\*.py <사용자>@<파이IP>:~/grasp/hand_control/
+scp detection\*.py <사용자>@<파이IP>:~/EXTRA-hand-grasp/detection/
+scp hand_control\*.py <사용자>@<파이IP>:~/EXTRA-hand-grasp/hand_control/
 ```
 
 파이에서 데몬이 돌고 있으면 **먼저 끄고** 보낸다. 파이썬이 이미 메모리에 올린
@@ -328,7 +328,7 @@ echo "== Python =="; python --version
 echo "== rustypot =="; python -c "import rustypot; print('OK')" 2>&1 | tail -1
 echo "== pyrealsense2 =="; python -c "import pyrealsense2 as rs; print('OK', rs.__version__)" 2>&1 | tail -1
 echo "== cv2 / numpy =="; python -c "import cv2, numpy; print('OK', cv2.__version__, numpy.__version__)" 2>&1 | tail -1
-echo "== 코드 =="; ls ~/grasp/detection/grasp_daemon.py ~/grasp/hand_control/hand.py 2>&1
+echo "== 코드 =="; ls ~/EXTRA-hand-grasp/detection/grasp_daemon.py ~/EXTRA-hand-grasp/hand_control/hand.py 2>&1
 echo "== CH341 드라이버 =="; ls /dev/ch34x_pis* 2>&1 | head -1
 echo "== 서보 포트 =="; ls /dev/ttyUSB* 2>&1
 echo "== 그룹 =="; groups | tr ' ' '\n' | grep -E 'dialout|plugdev' || echo "  dialout/plugdev 없음 - 재로그인 필요"

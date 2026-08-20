@@ -29,7 +29,7 @@
 
 ```bash
 source ~/venv/bin/activate
-cd ~/grasp/detection
+cd ~/EXTRA-hand-grasp/detection
 python grasp_daemon.py
 ```
 
@@ -49,7 +49,7 @@ python grasp_daemon.py
 ### PC에서 (그다음)
 
 ```powershell
-cd grasp\detection
+cd EXTRA-hand-grasp\detection
 python grasp_console.py --host <파이IP>
 ```
 

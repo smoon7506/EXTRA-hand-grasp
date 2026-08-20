@@ -1,4 +1,4 @@
-# grasp — D405 + EXTRA Hand 자율 파지
+# EXTRA-hand-grasp — D405 + EXTRA Hand 자율 파지
 
 카메라로 물체를 보고, 손목을 돌려 각도를 맞춘 뒤, 잡는다.
 **라즈베리파이(판정·구동)와 PC(화면·입력) 두 프로세스로 나뉘어 있다.**
@@ -45,8 +45,8 @@
 파일이 몇 개 같이 있어도 손해가 아니다.
 
 ```bash
-git clone https://github.com/smoon7506/grasp.git
-cd grasp
+git clone https://github.com/smoon7506/EXTRA-hand-grasp.git
+cd EXTRA-hand-grasp
 ```
 
 ### 파이 (라즈베리파이 5)
@@ -104,7 +104,7 @@ D405, URT-1(손+손목), 촉각 센서 모두 파이 USB 에 꽂는다. PC 에�
 
 ```bash
 source ~/venv/bin/activate
-cd ~/grasp/detection
+cd ~/EXTRA-hand-grasp/detection
 python grasp_daemon.py
 ```
 
@@ -114,7 +114,7 @@ SSH 가 끊기면 데몬도 죽으니 오래 띄울 거면 `tmux` 를 쓴다.
 **터미널 2 — PC**
 
 ```powershell
-cd grasp\detection
+cd EXTRA-hand-grasp\detection
 python grasp_console.py --host <파이IP>
 ```
 
