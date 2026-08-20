@@ -160,7 +160,7 @@ class Hand:
 
         --- 왜 sync_read 를 안 쓰는가 ---
         SCS0009 는 SYNC READ 에 응답하지 않는다. 근거:
-          - AmazingHand 원본(get_zeros.rs:106, goto.rs:43)은 위치를
+          - 원본 펌웨어(get_zeros.rs:106, goto.rs:43)는 위치를
             모터 하나씩 read_present_position 으로 읽는다. sync_read 를
             쓰는 곳이 한 군데도 없다.
           - amazing_hand_gui.py:3377 에 "sync_read_moving timed out;

@@ -164,51 +164,79 @@ ls /dev/ch34x_pis*         # 드라이버가 올라왔으면 여기 보인다
 
 ---
 
-## 4. 코드 옮기기 — 주의할 점이 있다
-
-**이 저장소에는 git 원격이 없다.** GitHub에서 clone 할 수 없으므로 PC에서 직접 밀어 넣어야 한다. 게다가 **`tactile_sensor/` 와 `tactile_motor_test/` 는 git에 추적조차 안 되고 있어서**, 설령 원격이 있어도 clone 으로는 안 따라온다.
-
-### 방법 A — PC에서 scp 로 직접 (가장 단순)
-
-PC(Windows PowerShell)에서:
-
-```powershell
-# 필요한 것만 골라서 보낸다. AmazingHand-main2 같은 큰 폴더는 파이에 필요 없다.
-scp -r C:\Users\desktop\Desktop\haram_code\detection      wearlab@192.168.137.236:~/haram_code/
-scp -r C:\Users\desktop\Desktop\haram_code\hand_control   wearlab@192.168.137.236:~/haram_code/
-scp -r C:\Users\desktop\Desktop\haram_code\tactile_sensor wearlab@192.168.137.236:~/haram_code/
-```
-
-### 방법 B — 파이를 git 원격으로 (앞으로 계속 밀어 넣을 거라면 이쪽)
-
-파이에서:
+## 4. 코드 받기
 
 ```bash
-mkdir -p ~/haram_code.git && cd ~/haram_code.git && git init --bare
+git clone https://github.com/smoon7506/grasp.git ~/roi-grasp
+cd ~/roi-grasp
 ```
 
-PC에서:
+비공개 저장소라 인증이 필요하다. 파이에는 브라우저가 없어서 PC 처럼 클릭 한
+번으로 안 되고, 둘 중 하나를 쓴다.
 
-```powershell
-git remote add pi wearlab@192.168.137.236:~/haram_code.git
-git push pi roi-align-grasp
-```
+**방법 A — Personal Access Token (간단)**
 
-파이에서 작업 트리로 꺼내기:
+GitHub → Settings → Developer settings → Personal access tokens (classic) →
+`repo` 권한으로 발급. `git clone` 이 물어볼 때 비밀번호 자리에 토큰을 넣는다.
+매번 묻는 게 싫으면:
 
 ```bash
-git clone ~/haram_code.git ~/haram_code && cd ~/haram_code && git checkout roi-align-grasp
+git config --global credential.helper 'store'   # ~/.git-credentials 에 평문 저장
 ```
 
-방법 B를 쓰더라도 `tactile_sensor/` 는 추적되지 않으므로 **scp 로 따로** 보내야 한다.
+평문으로 남으므로 공용 파이에서는 쓰지 않는다.
+
+**방법 B — 배포 키 (deploy key, 자동화에 적합)**
+
+파이에서 키를 만들고:
+
+```bash
+ssh-keygen -t ed25519 -C "raspberrypi deploy" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+```
+
+출력된 공개키를 GitHub 저장소 → Settings → **Deploy keys** → Add deploy key
+에 붙인다(쓰기가 필요 없으면 Allow write access 는 체크하지 않는다). 그다음:
+
+```bash
+git clone git@github.com:smoon7506/grasp.git ~/roi-grasp
+```
+
+이후 코드 갱신은 `git pull` 한 줄이면 된다.
+
+### 촉각 센서 SDK 는 따로 받는다
+
+벤더 SDK(Tashan capRead)는 저장소에 없다. 센서와 같이 받은 것을 파이에 올리고
+경로를 알려준다:
+
+```bash
+export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit
+```
+
+`~/.bashrc` 에 넣어두면 매번 안 쳐도 된다. 없으면 `--simple-grasp` 로 촉각 없이
+돌릴 수 있다.
+
+### PC 에서 파이로 직접 밀어 넣기 (급할 때)
+
+git 을 거치지 않고 고친 파일만 보낼 수도 있다. 다만 **`.py` 만 보낸다** —
+`roi.json` 과 `hand_mask.npy` 는 파이가 소유하는 캘리브레이션이라 통째로 덮으면
+날아간다.
+
+```powershell
+scp detection\*.py wearlab@192.168.137.236:~/roi-grasp/detection/
+scp hand_control\*.py wearlab@192.168.137.236:~/roi-grasp/hand_control/
+```
+
+파이에서 데몬이 돌고 있으면 **먼저 끄고** 보낸다. 파이썬이 이미 메모리에 올린
+코드는 파일을 덮어써도 안 바뀐다.
 
 ### SSH 키를 넣어두면 편하다
 
-지금은 접속할 때마다 비밀번호를 묻는다. PC에서 한 번만:
+접속할 때마다 비밀번호를 묻는 게 번거로우면 PC 에서 한 번만:
 
 ```powershell
 ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh wearlab@192.168.137.236 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh wearlab@<파이IP> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
 ```
 
 ---

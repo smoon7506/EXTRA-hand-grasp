@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """a(굽힘) / s(벌림) -> 모터 각도. 하드웨어를 모르는 순수 계산.
 
-AmazingHand 는 손가락 하나에 모터가 2개인 차동(differential) 구조다.
+EXTRA Hand 는 손가락 하나에 모터가 2개인 차동(differential) 구조다.
 두 모터를 어떻게 섞느냐로 두 가지 동작이 나온다.
 
     부호가 반대 (m1 = +x, m2 = -x)  ->  굽힘/폄   (flexion)
