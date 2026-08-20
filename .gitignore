@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# 실행 중에 만들어지는 캘리브레이션·상태. 설치마다 다르다.
+detection/roi.json
+detection/hand_mask.npy
+detection/backup/
+logs/
+out/

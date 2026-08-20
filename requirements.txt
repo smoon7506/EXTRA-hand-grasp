@@ -1,0 +1,19 @@
+# 파이(데몬)와 PC(콘솔) 양쪽
+numpy
+opencv-python
+
+# 파이에만 -- 카메라와 모터
+# pyrealsense2 는 Python 3.13 aarch64 휠이 없어 librealsense 소스 빌드가
+# 필요할 수 있다. docs/pi-setup.md 참고.
+pyrealsense2
+rustypot
+
+# 개발용
+pytest
+
+# --- 여기 없는 것 ---
+# 촉각 센서 드라이버(Tashan capRead + CH341)는 pip 에 없다. 센서와 같이
+# 받은 SDK 를 쓰고, 리눅스에서는 커널 모듈을 직접 빌드해야 한다.
+# docs/pi-setup.md 3장 참고. 없으면 --simple-grasp 로 돌린다.
+#
+# MuJoCo 는 main.py --sim 에만 필요하다. 파지에는 안 쓴다.

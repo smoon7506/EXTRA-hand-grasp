@@ -1,0 +1,237 @@
+# roi-grasp — D405 + AmazingHand 자율 파지
+
+카메라로 물체를 보고, 손목을 돌려 각도를 맞춘 뒤, 잡는다.
+**라즈베리파이(판정·구동)와 PC(화면·입력) 두 프로세스로 나뉘어 있다.**
+
+```
+파이 (grasp_daemon.py)                     PC (grasp_console.py)
+  D405 → 깊이 판정 → 상태기계 → 모터
+         └─ 33ms 안에 전부 파이 안에서 끝난다
+              │
+              │  텔레메트리 465B + JPEG + ROI마스크 345B   (5001/5002)
+              ├─────────────────────────────────────────→  화면에 그림
+              │                                               사람이 키를 누름
+              ←─────────────────────────────────────────┤
+                 명령 {"cmd":"capture_target"}
+```
+
+**깊이 배열은 네트워크로 안 나간다.** 640×480 float32 는 1.2MB/프레임이다.
+화면이 필요로 하는 건 ROI 크기 이진 마스크(약 345B)뿐이라 그것만 보낸다.
+
+**네트워크가 판정 루프 안에 없다.** WiFi 가 끊겨도 손목이 정렬 도중에 굳지 않는다.
+
+---
+
+## 하드웨어
+
+| 장치 | 연결 | VID:PID |
+|---|---|---|
+| AmazingHand — SCS0009 ×10 | URT-1 → `/dev/ttyUSB0` | `1a86:7523` |
+| 손목 — STS3215 | **같은 버스** (URT-1 커넥터는 병렬) | — |
+| Intel RealSense D405 | USB3 | `8086:0b5b` |
+| Tashan 촉각 센서 ×5 | CH341 I2C → `/dev/ch34x_pis0` | `1a86:5512` |
+
+손과 손목이 같은 시리얼 버스를 쓴다. 동시에 못 열어서 `servo_bus.ServoLease`
+로 시분할하고, 상태에 따라 데몬이 자동으로 넘긴다.
+
+---
+
+## 설치
+
+```bash
+git clone <이 저장소> && cd roi-grasp
+python3 -m venv venv --system-site-packages && source venv/bin/activate
+pip install -r requirements.txt
+```
+
+파이에서는 `pyrealsense2` 소스 빌드와 CH341 커널 모듈이 더 필요하다 —
+**`docs/pi-setup.md` 를 따라간다.** 거기 함정이 몇 개 있다.
+
+촉각 센서 SDK(Tashan capRead)는 이 저장소에 없다. 센서와 같이 받은 것을 쓴다.
+없으면 `--simple-grasp` 로 촉각 없이 돌릴 수 있다.
+
+---
+
+## 실행
+
+```bash
+# 파이 (먼저)
+cd detection && python grasp_daemon.py
+
+# PC (그다음)
+cd detection && python grasp_console.py --host <파이IP>
+```
+
+붙으면 화면에 `DISARMED` 가 보인다. **`m` 을 눌러야 판정이 시작된다** —
+부팅하자마자 손이 알아서 잡으면 안 되기 때문이다.
+
+옵션: `--no-hand`(카메라만) `--no-wrist` `--simple-grasp`(촉각 대신 고정 자세)
+`--preview-fps` `--preview-scale`
+
+처음이면 **`docs/pi-run.md` 의 4단계 브링업**을 따라간다. 한 번에 다 붙이면
+안 될 때 원인을 못 가린다.
+
+### 키
+
+| 키 | | 키 | |
+|---|---|---|---|
+| 드래그 | ROI 지정 | `t` | 지금 각도를 목표로 |
+| `m` | **무장 / 해제** | `,` `.` | 목표 각도 ±1도 |
+| `a` | 자동 정렬 on/off | `h` | 손 마스크 저장 (물체 치우고) |
+| `n` `f` | 밴드 near/far 캘리브레이션 | `w` `W` | 손목 수동 조그 |
+| `[` `]` | near ±5mm | `r` | 놓기 |
+| `-` `=` | far ±5mm | `space` | **비상 폄** |
+| | | `q` | 콘솔 종료 (데몬은 계속 산다) |
+
+---
+
+## 파일
+
+### 진입점 3개
+
+| | 무엇 |
+|---|---|
+| `detection/grasp_daemon.py` | **파이.** 카메라·손·손목·촉각을 물고 판정 루프. 화면 없음 |
+| `detection/grasp_console.py` | **PC.** 화면을 그리고 키를 명령으로 보낸다 |
+| `hand_control/main.py` | 손 수동 조작 (`a`=굽힘 `s`=벌림). 브링업·점검용 |
+
+### `detection/` — 비전과 판정
+
+| 묶음 | 파일 |
+|---|---|
+| 통신 | `link` (프로토콜) `link_sender` (막히면 버림) `link_watchdog` (끊김 대응) `grasp_commands` (명령→동작) |
+| 판정 | `roi_judge` (깊이→물체 유무) `orientation` (장축 각도) `wrist_align` (각도→손목 goal) `grasp_state` (상태기계) |
+| 설정·입력 | `roi_config` (ROI·밴드·목표각) `console_input` (키·좌표 환산) |
+| 기준선 | `roi_grasp.py` — 아래 참고 |
+
+판정 4개는 **하드웨어도 화면도 네트워크도 모른다.** 그래서 카메라 없이 전부 테스트된다.
+
+### `hand_control/` — 모터와 촉각
+
+| 묶음 | 파일 |
+|---|---|
+| 하드웨어 | `hand` (손 10모터) `wrist` (STS3215) `servo_bus` (포트 시분할) `tactile` (촉각 5개) |
+| 파지 | `grasp_runner` `grasp` `force_control` `stiffness` `sequence` `grasp_log` |
+| 계산·설정 | `kinematics` `hand_config` |
+| 도구 | `main.py` (수동 조작) `servo_id_tool.py` (서보 ID 변경) `sim.py` (MuJoCo, 선택) |
+
+### `config/r_hand.toml`
+
+모터 ID 1~10 과 오프셋. **이 저장소가 이 파일의 주인이다.**
+손을 새로 조립했거나 서보를 바꿨으면 여기만 고친다. 사본을 두 곳에 두지 말 것 —
+예전에 오프셋 사본이 원본과 어긋나 손가락이 엉뚱한 각도로 간 적이 있다.
+
+---
+
+## 반드시 알아야 할 규약 5가지
+
+이 다섯 개만 지키면 큰 사고는 안 난다.
+
+### 1. 콘솔은 "값"이 아니라 "동작"을 보낸다
+
+`n` 키(밴드 캘리브레이션)는 *그 프레임의* median 으로 값을 정한다. 콘솔이 받은
+median 은 이미 100ms 낡았으므로, 콘솔이 계산해서 보내면 **캘리브레이션이 조용히
+틀린다.**
+
+| 키 | 틀린 방식 | 올바른 방식 |
+|---|---|---|
+| `n`/`f` | `{"set_band":{"near_m":0.183}}` | `{"cmd":"calib_band","edge":"near"}` |
+| `t` | `{"set_target_angle":8.2}` | `{"cmd":"capture_target"}` |
+| `h` | 마스크 배열을 올려보냄 | `{"cmd":"save_hand_mask"}` |
+
+`[ ] - =` 와 `,` `.` 는 원래 "현재 값에서 얼마만큼"이라 상대량을 보내면 맞다.
+
+### 2. 무장은 항상 사람이 건다
+
+데몬은 `armed=False` 로 기동한다. 링크가 끊겼다 돌아와도 **자동 재무장하지
+않는다.** 사람이 `m` 을 눌러야 한다.
+
+### 3. 부분 송신된 프레임은 반드시 마저 보낸다
+
+논블로킹 `send()` 는 커널 버퍼에 들어가는 만큼만 받는다. 이미 나간 바이트는
+되돌릴 수 없으므로 나머지를 버리면 수신 측 스트림이 **영구히** 어긋난다
+(`미리보기 프레임이 3537097941 바이트다` 로 터진 적이 있다).
+
+`DropSender` 가 꼬리를 `_pending` 에 들고 있다가 `flush()` 로 마저 보낸다.
+그동안 들어온 새 프레임은 통째로 버린다 — **버리는 자리는 항상 프레임 경계다.**
+
+### 4. `roi.json` / `hand_mask.npy` 는 파이가 소유한다
+
+판정하는 쪽이 가져야 PC 와 어긋나지 않는다. PC 는 `detection/backup/` 에 사본만
+떨군다(git 에 안 들어간다). **이 백업을 읽어서 쓰지 않는다.**
+
+### 5. `roi_grasp.py` 는 기준선이다
+
+분할 전과 같이 동작하는 단일 프로세스 버전이다. 모니터를 붙이면 이것만으로 돈다.
+
+```bash
+python roi_grasp.py
+```
+
+데몬+콘솔이 이상할 때 이걸 돌려 원인을 가른다 — 여기서도 이상하면 분리 탓이
+아니고(하드웨어·캘리브레이션), 여기서 멀쩡하면 분리하면서 생긴 문제다.
+
+이 파일은 `roi_config`/`roi_judge`/`grasp_state` 를 import 해서 쓴다.
+자체 정의를 갖고 있으면 옛 통짜본이 덮인 것이다:
+
+```bash
+grep -c "^def band_ratio" detection/roi_grasp.py   # 0 이어야 정상
+```
+
+---
+
+## 링크가 끊기면
+
+PC 가 2초간 아무것도 안 보내면 끊긴 것으로 본다(30Hz 기준 60프레임).
+
+| 그때 상태 | 조치 |
+|---|---|
+| ARMED | 무장 해제 |
+| ALIGNING / CONFIRMING | 즉시 물러나 무장 해제 |
+| GRASPING | **끝까지 진행** → HOLDING (중간에 멈추면 손가락이 반쯤 닫힌 채 끼인다) |
+| HOLDING | 30초 후 자동 폄. 링크가 돌아오면 타이머 취소 |
+| RELEASING | 끝까지 |
+
+과열 보호는 별개로 항상 돈다 — 1초마다 온도를 읽고, 한계를 넘거나 못 읽으면 편다.
+
+---
+
+## 안 될 때
+
+| 증상 | 원인 |
+|---|---|
+| 모든 모터가 `Parsing error` | **서보 전원.** 포트가 정상으로 보여도 그렇다 |
+| `No CH341 device found on Linux` | 커널 모듈 미로드. `lsusb` 에 보이는 것과 별개다 |
+| CH341 `make` 가 경로를 못 찾음 | 폴더 이름의 `&` 때문. `driver/` 를 `&` 없는 곳으로 복사해서 빌드 |
+| 물체가 손에 있는데 안 잡힘 | `near_m` 이 D405 Min-Z(약 7cm)보다 낮으면 그 구간은 센서가 원래 못 본다 |
+| 영상이 뚝뚝 끊김 | `--preview-fps 8 --preview-scale 0.5`. 판정은 30Hz 그대로. D405 가 USB 2.0 포트인지도 확인 |
+| ROI 박스가 드래그한 자리와 다름 | 좌표 환산. `--preview-scale 1.0` 으로 돌려 확인 |
+| 키를 눌렀는데 반응 없음 | PC 터미널에 `[NAK]` 로 이유가 뜬다 |
+| 손이 접힌 채로 있음 | `hand.connect()` 후 `hand.release()`. 현재 위치를 먼저 읽고 토크를 켜므로 안 튄다 |
+
+시리얼 포트가 다르면 환경변수로 덮는다:
+
+```bash
+export HAND_SERIAL_PORT=/dev/ttyUSB1
+```
+
+---
+
+## 테스트
+
+```bash
+cd detection     && python -m pytest tests/ -q    # 184개
+cd hand_control  && python -m pytest tests/ -q    # 258개
+```
+
+전부 하드웨어 없이 돈다. 코드를 고쳤으면 파이에 올리기 전에 여기서 먼저 돌린다.
+
+---
+
+## 더 읽을 것
+
+| 문서 | 내용 |
+|---|---|
+| `docs/pi-setup.md` | 파이 사전 준비. rustypot / librealsense / CH341 커널 모듈 / USB 권한 |
+| `docs/pi-run.md` | 4단계 브링업과 문제 해결 |
+| `docs/design.md` | **왜 이렇게 나눴는지.** 연산 측정치, ESP32 를 뺀 이유, 계약 설계 |
