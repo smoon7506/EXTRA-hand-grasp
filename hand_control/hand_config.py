@@ -239,7 +239,7 @@ def load_fingers(toml_path=HAND_TOML, weights=None, active=None):
 # 참조한다 -- 벤더 SDK 라 이 저장소에 포함하지 않았다. 센서와 같이 받은
 # 것을 아무 데나 풀고 그 경로를 알려준다:
 #
-#   export CAPREAD_DIR=/home/wearlab/capRead_Python-win\&Linux-64bit
+#   export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit
 #
 # 기본값은 이 저장소 옆의 vendor/capRead 다. 없으면 촉각 센서만 안 열리고
 # 나머지는 정상이다 -- 그때는 --simple-grasp 로 돌린다.

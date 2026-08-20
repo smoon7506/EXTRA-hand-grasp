@@ -43,7 +43,8 @@
 파일이 몇 개 같이 있어도 손해가 아니다.
 
 ```bash
-git clone <이 저장소> && cd roi-grasp
+git clone https://github.com/smoon7506/grasp.git
+cd grasp
 ```
 
 ### 파이 (라즈베리파이 5)
@@ -112,7 +113,7 @@ SSH 가 끊기면 데몬도 죽으니 오래 띄울 거면 `tmux` 를 쓴다.
 
 ```powershell
 cd roi-grasp\detection
-python grasp_console.py --host 192.168.137.236
+python grasp_console.py --host <파이IP>
 ```
 
 여기서 영상 창이 뜬다. `--host` 는 파이 IP 다(기본값 `127.0.0.1` 은 같은 기계에서
@@ -169,7 +170,7 @@ python grasp_console.py --host 192.168.137.236
 | 하드웨어 | `hand` (손 10모터) `wrist` (STS3215) `servo_bus` (포트 시분할) `tactile` (촉각 5개) |
 | 파지 | `grasp_runner` `grasp` `force_control` `stiffness` `sequence` `grasp_log` |
 | 계산·설정 | `kinematics` `hand_config` |
-| 도구 | `main.py` (수동 조작) `servo_id_tool.py` (서보 ID 변경) `sim.py` (MuJoCo, 선택) |
+| 도구 | `main.py` (수동 조작) `servo_id_tool.py` (서보 ID 변경) |
 
 ### `config/r_hand.toml`
 
@@ -321,3 +322,29 @@ python -m pytest tests/ -q --collect-only    # 무엇을 보장하는지 목록�
 | `docs/pi-setup.md` | 파이 사전 준비. rustypot / librealsense / CH341 커널 모듈 / USB 권한 |
 | `docs/pi-run.md` | 4단계 브링업과 문제 해결 |
 | `docs/design.md` | **왜 이렇게 나눴는지.** 연산 측정치, ESP32 를 뺀 이유, 계약 설계 |
+
+---
+
+## 이 저장소에 없는 것
+
+**촉각 센서 SDK.** Tashan 센서와 WCH CH341 칩의 드라이버는 각 제조사 것이라
+재배포하지 않는다. 센서를 살 때 같이 받은 것을 쓰고 경로만 알려준다:
+
+```bash
+export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit
+```
+
+리눅스에서는 라이브러리만으로 부족하고 CH341 커널 모듈을 직접 빌드해야 한다
+(`docs/pi-setup.md` 3장). 센서가 없거나 SDK 가 없으면 `--simple-grasp` 로
+촉각 없이 고정 자세 파지를 쓸 수 있다 — 나머지는 전부 정상 동작한다.
+
+**MuJoCo 시뮬레이션 씬.** 파지에 필요 없고 파일이 커서 뺐다.
+
+---
+
+## 라이선스
+
+MIT — `LICENSE` 참고. 마음대로 쓰고 고치고 배포해도 된다. 출처만 밝혀 주면 된다.
+
+단, 위의 벤더 SDK 는 이 라이선스가 적용되지 않는다. 그건 각 제조사의 조건을
+따른다.

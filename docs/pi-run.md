@@ -50,7 +50,7 @@ python grasp_daemon.py
 
 ```powershell
 cd C:\Users\desktop\Desktop\haram_code\detection
-python grasp_console.py --host 192.168.137.236
+python grasp_console.py --host <파이IP>
 ```
 
 파이 IP 를 넣는다. 기본값은 `127.0.0.1` 이라 같은 기계에서 쓸 때만 맞다.

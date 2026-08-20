@@ -223,8 +223,8 @@ git 을 거치지 않고 고친 파일만 보낼 수도 있다. 다만 **`.py` �
 날아간다.
 
 ```powershell
-scp detection\*.py wearlab@192.168.137.236:~/roi-grasp/detection/
-scp hand_control\*.py wearlab@192.168.137.236:~/roi-grasp/hand_control/
+scp detection\*.py <사용자>@<파이IP>:~/roi-grasp/detection/
+scp hand_control\*.py <사용자>@<파이IP>:~/roi-grasp/hand_control/
 ```
 
 파이에서 데몬이 돌고 있으면 **먼저 끄고** 보낸다. 파이썬이 이미 메모리에 올린
@@ -236,7 +236,7 @@ scp hand_control\*.py wearlab@192.168.137.236:~/roi-grasp/hand_control/
 
 ```powershell
 ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh wearlab@<파이IP> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh <사용자>@<파이IP> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
 ```
 
 ---
