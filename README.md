@@ -26,7 +26,7 @@
 
 | 장치 | 연결 | VID:PID |
 |---|---|---|
-| AmazingHand — SCS0009 ×10 | URT-1 → `/dev/ttyUSB0` | `1a86:7523` |
+| EXTRA Hand — SCS0009 ×10 | URT-1 → `/dev/ttyUSB0` | `1a86:7523` |
 | 손목 — STS3215 | **같은 버스** (URT-1 커넥터는 병렬) | — |
 | Intel RealSense D405 | USB3 | `8086:0b5b` |
 | Tashan 촉각 센서 ×5 | CH341 I2C → `/dev/ch34x_pis0` | `1a86:5512` |

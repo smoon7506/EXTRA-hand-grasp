@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""a(굽힘) / s(벌림) 값으로 AmazingHand 를 움직인다.
+"""a(굽힘) / s(벌림) 값으로 EXTRA Hand 를 움직인다.
 
   python main.py --dry-run     모터 없이 목표 각도만 출력
   python main.py               실물 손
@@ -155,7 +155,7 @@ def run_dry():
 def main():
     p = argparse.ArgumentParser(
         prog="main.py",
-        description="a(굽힘)/s(벌림) 값으로 AmazingHand 손가락 구동",
+        description="a(굽힘)/s(벌림) 값으로 EXTRA Hand 손가락 구동",
     )
     g = p.add_mutually_exclusive_group()
     g.add_argument("--dry-run", action="store_true",

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""D405 ROI 안에 물체가 들어오면 AmazingHand 로 파지한다.
+"""D405 ROI 안에 물체가 들어오면 EXTRA Hand 로 파지한다.
 
 카메라와 손은 서로 고정되어 있다는 전제다. 그래서 YOLO 로 손을 매 프레임
 찾을 필요가 없다 -- 손 위치는 픽셀 좌표로 한 번 정해두면 끝이다.
@@ -236,7 +236,7 @@ def main():
 
     p = argparse.ArgumentParser(
         prog="roi_grasp.py",
-        description="ROI 안에 물체가 들어오면 AmazingHand 로 파지")
+        description="ROI 안에 물체가 들어오면 EXTRA Hand 로 파지")
     p.add_argument("--no-hand", action="store_true",
                    help="모터에 연결하지 않고 카메라·판정만")
     p.add_argument("--no-wrist", action="store_true",
