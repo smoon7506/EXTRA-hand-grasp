@@ -24,6 +24,8 @@
 
 ## 하드웨어
 
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/0d8d9a55-846f-4456-98fa-8dae1afb0b2e" />
+
 | 장치 | 연결 | VID:PID |
 |---|---|---|
 | EXTRA Hand — SCS0009 ×10 | URT-1 → `/dev/ttyUSB0` | `1a86:7523` |
