@@ -93,11 +93,63 @@ echo 'export PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.13/site-packages' >> 
 
 ---
 
-## 3. CH341 촉각 센서 — 커널 모듈이 필요하다
+## 3. CH341 촉각 센서 — SDK 는 따로 받는다
 
-Tashan 촉각 센서는 CH341 USB-I²C 브리지를 통해 붙는다. **윈도우와 달리 리눅스에서는 커널 모듈을 직접 빌드해서 올려야 한다.** 이건 미리 알아두지 않으면 실물 브링업 때 막힌다.
+Tashan 촉각 센서는 CH341 USB-I²C 브리지를 통해 붙는다. **드라이버 SDK 는 이
+저장소에 없다** — 제조사 것이라 재배포하지 않는다. 센서를 살 때 같이 받은
+`capRead_Python-win&Linux-64bit` 폴더를 파이에 올리고 경로를 알려준다:
 
-### 3-1. 커널 헤더
+```bash
+export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit
+echo 'export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit' >> ~/.bashrc
+```
+
+**촉각 센서가 없거나 SDK 를 못 구했으면 이 장을 통째로 건너뛴다.**
+`--simple-grasp` 로 촉각 없이 고정 자세 파지를 쓸 수 있고, 나머지는 전부 정상
+동작한다. 카메라·손목·정렬을 먼저 확인하고 나중에 돌아오는 편이 문제를 가리기
+쉽다.
+
+윈도우와 달리 **리눅스에서는 세 가지가 다 필요하다.** 하나라도 빠지면 센서가
+안 열린다.
+
+### 3-1. SDK 를 aarch64 에서 돌게 고친다
+
+제조사 SDK 의 `class_ch341.py` 가 x86_64 경로를 하드코딩하고 있어서
+라즈베리파이(aarch64)에서는 라이브러리를 못 찾는다. `init()` 안의 posix 분기를
+찾는다:
+
+```python
+libPath = os.path.join(script_dir, 'lib', 'ch341', 'CH341PAR_LINUX',
+                       'lib', 'x64', 'dynamic', 'libch347.so')
+```
+
+이렇게 바꾼다 (파일 맨 위에 `import platform` 도 추가):
+
+```python
+if platform.machine() in ['aarch64', 'arm64']:
+    libPath = '/usr/lib/libch347.so'
+else:
+    libPath = os.path.join(script_dir, 'lib', 'ch341', 'CH341PAR_LINUX',
+                           'lib', 'x64', 'dynamic', 'libch347.so')
+```
+
+안 고치면 `未找到库文件` (라이브러리를 못 찾음) 로 실패한다.
+
+### 3-2. aarch64 라이브러리를 시스템에 넣는다
+
+SDK 안에 아키텍처별 `.so` 가 들어 있다. **aarch64 것을** 복사한다:
+
+```bash
+cd "$CAPREAD_DIR"/lib/ch341/CH341PAR_LINUX
+sudo cp lib/aarch64/dynamic/libch347.so /usr/lib/
+sudo ldconfig
+```
+
+### 3-3. 커널 모듈을 빌드한다
+
+`lsusb` 에 장치가 보여도 이게 없으면 `/dev/ch34x_pis*` 가 안 생긴다.
+
+먼저 커널 헤더:
 
 ```bash
 sudo apt install raspberrypi-kernel-headers
@@ -105,41 +157,29 @@ sudo apt install raspberrypi-kernel-headers
 sudo apt install linux-headers-rpi-v8
 ```
 
-### 3-2. 드라이버 빌드 — 경로의 `&` 때문에 그 자리에서는 안 된다
-
-**드라이버 폴더를 `&` 없는 곳으로 복사해서 빌드해야 한다.** 원래 자리에서 `make` 하면 이렇게 깨진다:
+**드라이버 폴더를 `&` 없는 곳으로 복사해서 빌드해야 한다.** SDK 폴더 이름에
+`&` 가 들어 있어서 원래 자리에서 `make` 하면 이렇게 깨진다:
 
 ```
 /bin/sh: 1: Linux-64bit/lib/ch341/CH341PAR_LINUX/driver: not found
 *** specified external module directory ".../capRead_Python-win" does not exist.
 ```
 
-Makefile 이 `M=$(PWD)` 를 따옴표 없이 넘기는데, 셸이 경로 안의 `&` 를 백그라운드 연산자로 읽어 경로를 두 동강 낸다.
+Makefile 이 `M=$(PWD)` 를 따옴표 없이 넘기는데, 셸이 경로 안의 `&` 를 백그라운드
+연산자로 읽어 경로를 두 동강 낸다.
 
 ```bash
-cp -r ~/haram_code/tactile_sensor/"capRead_Python-win&Linux-64bit-20260727T045120Z-1-001"/"capRead_Python-win&Linux-64bit"/lib/ch341/CH341PAR_LINUX/driver ~/ch341-driver
-
+cp -r "$CAPREAD_DIR"/lib/ch341/CH341PAR_LINUX/driver ~/ch341-driver
 cd ~/ch341-driver
 make                       # ch34x_pis.ko 가 생기면 성공
 sudo insmod ch34x_pis.ko   # 먼저 올려서 확인
-sudo make install          # 되면 영구 등록
+sudo make install          # 되면 영구 등록 (재부팅해도 유지)
 ```
 
-드라이버는 어디서 빌드하든 상관없다 — 커널에 올라가는 것이라 파이썬 코드 위치와 무관하다. 파이썬 쪽은 `/dev/ch34x_pis*` 만 찾는다.
+드라이버는 어디서 빌드하든 상관없다 — 커널에 올라가는 것이라 파이썬 코드
+위치와 무관하다. 파이썬 쪽은 `/dev/ch34x_pis*` 만 찾는다.
 
 커널 6.18.39 (Trixie / Pi 5) 에서 경고만 나고 빌드된다.
-
-### 3-3. aarch64 라이브러리 등록
-
-레포에 아키텍처별 `.so` 가 이미 들어 있다. **aarch64 것을** 시스템 경로에 넣는다:
-
-```bash
-cd ~/haram_code/tactile_sensor/"capRead_Python-win&Linux-64bit-20260727T045120Z-1-001"/"capRead_Python-win&Linux-64bit"/lib/ch341/CH341PAR_LINUX
-sudo cp lib/aarch64/dynamic/libch347.so /usr/lib/
-sudo ldconfig
-```
-
-`class_ch341.py` 는 aarch64 에서 `/usr/lib/libch347.so` 를 읽도록 고쳐 두었다. 이 복사를 안 하면 `未找到库文件` 로 실패한다.
 
 ### 3-4. 확인
 
@@ -167,8 +207,8 @@ ls /dev/ch34x_pis*         # 드라이버가 올라왔으면 여기 보인다
 ## 4. 코드 받기
 
 ```bash
-git clone https://github.com/smoon7506/grasp.git ~/roi-grasp
-cd ~/roi-grasp
+git clone https://github.com/smoon7506/grasp.git ~/grasp
+cd ~/grasp
 ```
 
 비공개 저장소라 인증이 필요하다. 파이에는 브라우저가 없어서 PC 처럼 클릭 한
@@ -199,7 +239,7 @@ cat ~/.ssh/id_ed25519.pub
 에 붙인다(쓰기가 필요 없으면 Allow write access 는 체크하지 않는다). 그다음:
 
 ```bash
-git clone git@github.com:smoon7506/grasp.git ~/roi-grasp
+git clone git@github.com:smoon7506/grasp.git ~/grasp
 ```
 
 이후 코드 갱신은 `git pull` 한 줄이면 된다.
@@ -223,8 +263,8 @@ git 을 거치지 않고 고친 파일만 보낼 수도 있다. 다만 **`.py` �
 날아간다.
 
 ```powershell
-scp detection\*.py <사용자>@<파이IP>:~/roi-grasp/detection/
-scp hand_control\*.py <사용자>@<파이IP>:~/roi-grasp/hand_control/
+scp detection\*.py <사용자>@<파이IP>:~/grasp/detection/
+scp hand_control\*.py <사용자>@<파이IP>:~/grasp/hand_control/
 ```
 
 파이에서 데몬이 돌고 있으면 **먼저 끄고** 보낸다. 파이썬이 이미 메모리에 올린
@@ -288,7 +328,7 @@ echo "== Python =="; python --version
 echo "== rustypot =="; python -c "import rustypot; print('OK')" 2>&1 | tail -1
 echo "== pyrealsense2 =="; python -c "import pyrealsense2 as rs; print('OK', rs.__version__)" 2>&1 | tail -1
 echo "== cv2 / numpy =="; python -c "import cv2, numpy; print('OK', cv2.__version__, numpy.__version__)" 2>&1 | tail -1
-echo "== 코드 =="; ls ~/haram_code/detection/roi_grasp.py ~/haram_code/hand_control/hand.py 2>&1
+echo "== 코드 =="; ls ~/grasp/detection/grasp_daemon.py ~/grasp/hand_control/hand.py 2>&1
 echo "== CH341 드라이버 =="; ls /dev/ch34x_pis* 2>&1 | head -1
 echo "== 서보 포트 =="; ls /dev/ttyUSB* 2>&1
 echo "== 그룹 =="; groups | tr ' ' '\n' | grep -E 'dialout|plugdev' || echo "  dialout/plugdev 없음 - 재로그인 필요"

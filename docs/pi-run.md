@@ -29,7 +29,7 @@
 
 ```bash
 source ~/venv/bin/activate
-cd ~/haram_code/detection
+cd ~/grasp/detection
 python grasp_daemon.py
 ```
 
@@ -49,7 +49,7 @@ python grasp_daemon.py
 ### PC에서 (그다음)
 
 ```powershell
-cd C:\Users\desktop\Desktop\haram_code\detection
+cd grasp\detection
 python grasp_console.py --host <파이IP>
 ```
 
