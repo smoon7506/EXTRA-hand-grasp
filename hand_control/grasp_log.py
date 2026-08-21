@@ -10,8 +10,13 @@ import csv
 import time
 from pathlib import Path
 
+# tf 는 전단력이다. 제어에는 아직 안 쓰지만 반드시 남긴다 -- 슬립은
+# 수직력(force_N)에 안 보인다는 것이 2026-08-21 감사로 확인됐고
+# (a 고정 구간 68개에서 dF/dt 중앙값 0, 감소:증가 46:54 대칭),
+# 임계값을 정하려면 "미끄러질 때 tf 가 얼마인가"의 실측이 필요하다.
+# 안 남긴 것은 영영 못 정한다.
 HEADER = [
-    "t", "finger", "state", "a", "flex_rad", "force_N",
+    "t", "finger", "state", "a", "flex_rad", "force_N", "tf",
     "k_hat", "confident", "class", "f_target",
 ]
 
@@ -44,8 +49,13 @@ class GraspLogger:
             self._file.close()
         return False
 
-    def row(self, t, finger, force, flex):
-        """FingerGrasp 하나의 현재 상태를 한 줄로."""
+    def row(self, t, finger, force, flex, shear=None):
+        """FingerGrasp 하나의 현재 상태를 한 줄로.
+
+        shear 가 기본값을 갖는 이유: tf 를 아직 안 넘기는 호출부가
+        남아 있다. 값을 안 주면 빈 칸이고, 그건 '전단력 0' 이 아니라
+        '측정 안 됨'이다 -- force_N 과 같은 규약이다.
+        """
         self._writer.writerow([
             f"{t:.3f}",
             finger.name,
@@ -53,6 +63,7 @@ class GraspLogger:
             f"{finger.a:.4f}",
             "" if flex is None else f"{flex:.5f}",
             "" if force is None else f"{force:.4f}",
+            "" if shear is None else f"{shear:.4f}",
             "" if finger.k_hat is None else f"{finger.k_hat:.3f}",
             "" if finger.confident is None else int(finger.confident),
             finger.object_class or "",

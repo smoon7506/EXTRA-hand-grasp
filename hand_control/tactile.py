@@ -321,6 +321,45 @@ class TactileHand:
             forces[name] = max(0.0, raw - self._baseline.get(index, 0.0))
         return forces
 
+    def read_shear(self):
+        """-> {손가락이름: 전단력 또는 None}. read_forces 와 같은 규약이다.
+
+        --- 왜 수직력만으로는 부족한가 ---
+        슬립은 접촉면에서 전단력이 마찰 한계를 넘는 현상이다. 손가락이
+        같은 힘으로 누르는 채로 물체가 그 아래로 흘러내리면 nf 는 거의
+        안 변한다. 2026-08-21 로그 감사가 그걸 확인했다 -- a 가 3초 이상
+        고정된 HOLD 구간 68개에서 dF/dt 중앙값이 0 이고 감소:증가가
+        46:54 로 대칭이었다. 슬립이라면 한쪽으로 쏠려야 한다.
+
+        --- 지금은 로그용이다 ---
+        제어에는 아직 안 쓴다. 임계값을 정하려면 "미끄러질 때 tf 가
+        얼마인가"의 실측이 필요한데 그 데이터가 한 줄도 없다. 먼저
+        쌓는다.
+
+        tf 가 빈 배열이면 None 이다. 개체에 따라 전단력을 안 보내는데,
+        0.0 으로 바꾸면 '전단력 없음'과 '측정 안 됨'이 같아 보여서
+        임계값을 잘못 잡는다. baseline 은 빼지 않는다 -- nf 와 달리
+        무부하 기준을 아직 안 재봤고, 원시값 그대로 쌓아야 나중에
+        어떻게 다룰지 정할 수 있다.
+        """
+        with self._lock:
+            raw = {i: dict(d) for i, d in self._raw.items()}
+            frames = dict(self._frames)
+        now = time.monotonic()
+        shear = {}
+        for index, name in hand_config.SENSOR_CHANNEL_MAP.items():
+            entry = frames.get(index)
+            snapshot = raw.get(index)
+            if entry is None or snapshot is None:
+                shear[name] = None
+                continue
+            if now - entry[1] > hand_config.STALE_TIMEOUT_S:
+                shear[name] = None
+                continue
+            tf = snapshot.get("tf")
+            shear[name] = float(tf[0]) if tf else None
+        return shear
+
     def read_raw(self):
         """-> {손가락이름: 진단 필드 dict}. 프레임이 없는 손가락은 키가 없다.
 

@@ -355,3 +355,42 @@ class Test스파이크_제거:
         self._fill(sensors, driver, 1.0)
         self._fill(sensors, driver, 38.0, times=2)
         assert sensors.read_forces()["r_finger1"] == pytest.approx(38.0)
+
+
+class Test전단력_읽기:
+    """슬립은 접촉면에서 전단력이 마찰 한계를 넘는 현상이다.
+
+    2026-08-21 로그 감사: a 가 3초 이상 고정된 HOLD 구간 68개에서
+    dF/dt 중앙값이 0 이고 감소:증가가 46:54 로 대칭이었다. 슬립이라면
+    한쪽으로 쏠려야 하는데 안 그렇다 -- 수직력(nf)에는 안 보인다는 뜻이다.
+    드라이버는 tf 를 매 프레임 보내주는데 지금까지 로그에 한 줄도 안
+    남겼다. 임계값을 정할 데이터가 없어서 슬립 대응을 못 만든다.
+
+    read_forces 와 같은 규약을 지킨다: SENSOR_CHANNEL_MAP 의 모든
+    손가락이 키로 나오고, 프레임이 없거나 STALE 이면 None.
+    """
+
+    def test_tf를_손가락_이름으로_돌려준다(self):
+        driver = FakeDriver()
+        t = TactileHand(driver=driver)
+        driver.push_frame(FakeDiagFrame(2, [0.0], tf=[1.25]))
+        t._drain_once()
+        assert t.read_shear()["r_finger1"] == pytest.approx(1.25)
+
+    def test_tf가_없는_개체는_None(self):
+        # 개체에 따라 tf 를 안 보낸다. 0.0 으로 바꾸면 '전단력 없음'과
+        # '측정 안 됨'이 같아 보여서 임계값을 잘못 잡는다.
+        driver = FakeDriver()
+        t = TactileHand(driver=driver)
+        driver.push_frame(FakeDiagFrame(2, [0.0], tf=[]))
+        t._drain_once()
+        assert t.read_shear()["r_finger1"] is None
+
+    def test_프레임이_없으면_None(self):
+        t = TactileHand(driver=FakeDriver())
+        assert t.read_shear()["r_finger1"] is None
+
+    def test_모든_손가락이_키로_나온다(self):
+        t = TactileHand(driver=FakeDriver())
+        assert (set(t.read_shear())
+                == set(hand_config.SENSOR_CHANNEL_MAP.values()))
