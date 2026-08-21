@@ -243,3 +243,61 @@ class Test벌림_바이어스:
         m1, m2 = self._cmd(self._finger(huge), a=1.0)
         assert hand_config.MOTOR_MIN_RAD <= m1 <= hand_config.MOTOR_MAX_RAD
         assert hand_config.MOTOR_MIN_RAD <= m2 <= hand_config.MOTOR_MAX_RAD
+
+
+class Test손가락별_벌림:
+    """s 를 손가락마다 다르게 줄 수 있어야 한다.
+
+    --- 왜 필요한가 ---
+    접촉을 못 찾은 손가락을 옆으로 훑어 최적 파지를 찾으려는데, s 가
+    손 전체 스칼라 하나면 이미 잡고 있는 손가락까지 같이 움직인다.
+    그러면 마찰이 줄어 물체가 미끄러진다. 물리적으로는 손가락마다
+    모터가 2개고 벌림은 그 안에서 (m1+m2)/2 로 완결되므로 독립이다 --
+    손 전체 스칼라인 건 호출부 사정일 뿐이다.
+
+    잡고 있는 손가락은 s 를 그대로 두고 못 찾은 손가락만 움직이면
+    푸는 것 없이 탐색할 수 있다.
+    """
+
+    def _fingers(self):
+        return [
+            hand_config.Finger(name="a", id1=1, offset1=0.0, id2=2,
+                               offset2=0.0, flex_weight=1.0,
+                               spread_weight=1.0),
+            hand_config.Finger(name="b", id1=3, offset1=0.0, id2=4,
+                               offset2=0.0, flex_weight=1.0,
+                               spread_weight=1.0),
+        ]
+
+    def _pose(self, a, s):
+        return kinematics.hand_pose(
+            a, s, self._fingers(),
+            hand_config.FLEX_LIMIT_RAD, hand_config.SPREAD_LIMIT_RAD,
+            hand_config.MOTOR_MIN_RAD, hand_config.MOTOR_MAX_RAD)
+
+    def test_손가락마다_다른_s를_준다(self):
+        pose = self._pose(0.0, {"a": 0.0, "b": 1.0})
+        # 벌림은 (m1+m2)/2 다. a 는 그대로, b 만 벌어져 있어야 한다.
+        assert (pose[1] + pose[2]) / 2 == pytest.approx(0.0)
+        assert ((pose[3] + pose[4]) / 2
+                == pytest.approx(hand_config.SPREAD_LIMIT_RAD))
+
+    def test_스칼라를_주면_전부에게_같이_적용된다(self):
+        # 기존 호출부(set_pose 등)를 안 깨야 한다.
+        pose = self._pose(0.0, 1.0)
+        for ids in ((1, 2), (3, 4)):
+            assert ((pose[ids[0]] + pose[ids[1]]) / 2
+                    == pytest.approx(hand_config.SPREAD_LIMIT_RAD))
+
+    def test_맵에_없는_손가락은_0으로_본다(self):
+        # 탐색은 일부 손가락만 움직인다. 빠진 손가락이 조용히 옛 값을
+        # 쓰면 지금 어느 자세인지 알 수 없어진다.
+        pose = self._pose(0.0, {"b": 1.0})
+        assert (pose[1] + pose[2]) / 2 == pytest.approx(0.0)
+
+    def test_굽힘은_영향을_안_받는다(self):
+        # flex = (m1-m2)/2. 벌림을 손가락별로 줘도 굽힘은 그대로여야
+        # 한다 -- 안 그러면 탐색이 파지력을 건드린다.
+        pose = self._pose(0.5, {"a": 1.0, "b": 0.0})
+        assert ((pose[1] - pose[2]) / 2
+                == pytest.approx(0.5 * hand_config.FLEX_LIMIT_RAD))

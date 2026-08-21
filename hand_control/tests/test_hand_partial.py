@@ -20,6 +20,9 @@ class FakeController:
     def write_goal_speed(self, mid, speed):
         pass
 
+    def sync_write_goal_position(self, ids, angles):
+        self.goals.extend(zip(ids, angles))
+
     def write_torque_enable(self, mid, value):
         self.torque.append((mid, value))
 
@@ -149,3 +152,52 @@ def test_disconnect_는_두_번_불려도_죽지_않는다(hand):
     hand.disconnect()
     hand.disconnect()
     assert hand._c is None
+
+
+class Test손가락별_벌림:
+    """set_pose_map 도 s 를 손가락별로 받아야 한다.
+
+    벌림 탐색(spread_seek)은 못 찾은 손가락만 옆으로 움직이고 잡고 있는
+    손가락은 건드리지 않는다. 그러려면 손가락마다 다른 s 가 나가야 한다.
+
+    2026-08-21 실물에서 이게 터졌다. kinematics.hand_pose 에만 dict 를
+    받게 고쳤는데, set_pose_map 은 hand_pose 를 안 거치고 finger_command
+    를 직접 부른다. 파지 도중 탐색이 시작되자마자 데몬이 죽었다:
+
+        TypeError: '<' not supported between instances of 'float' and 'dict'
+
+    가짜 Hand 로 돌린 러너 테스트는 이 경로를 안 타서 못 잡았다.
+    """
+
+    def test_손가락마다_다른_s를_받는다(self, hand, fingers):
+        names = [f.name for f in fingers]
+        sent = hand.set_pose_map({n: 0.5 for n in names},
+                                 s={names[0]: 0.3})
+        assert len(sent) == len(names) * 2
+
+    def test_맵에_없는_손가락은_0으로_본다(self, hand, fingers):
+        # 탐색은 일부만 움직인다. 빠진 손가락이 조용히 옛 값을 쓰면
+        # 지금 손이 어느 자세인지 알 수 없어진다.
+        names = [f.name for f in fingers]
+        per = hand.set_pose_map({n: 0.5 for n in names}, s={names[0]: 0.0})
+        flat = hand.set_pose_map({n: 0.5 for n in names}, s=0.0)
+        assert per == pytest.approx(flat)
+
+    def test_스칼라는_전부에게_같이_적용된다(self, hand, fingers):
+        # 기존 호출부를 안 깨야 한다.
+        names = [f.name for f in fingers]
+        scalar = hand.set_pose_map({n: 0.5 for n in names}, s=0.3)
+        per = hand.set_pose_map({n: 0.5 for n in names},
+                                s={n: 0.3 for n in names})
+        assert scalar == pytest.approx(per)
+
+    def test_잡은_손가락은_안_움직인다(self, hand, fingers):
+        # 탐색의 핵심. 동결된 손가락의 각도가 s=0 일 때와 같아야 한다.
+        names = [f.name for f in fingers]
+        frozen, seeking = names[0], names[1]
+        base = hand.set_pose_map({n: 0.5 for n in names}, s=0.0)
+        moved = hand.set_pose_map({n: 0.5 for n in names},
+                                  s={seeking: 0.3, frozen: 0.0})
+        f0 = [f for f in fingers if f.name == frozen][0]
+        for mid in (f0.id1, f0.id2):
+            assert moved[mid] == pytest.approx(base[mid])

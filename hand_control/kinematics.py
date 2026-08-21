@@ -88,11 +88,25 @@ def hand_pose(a, s, fingers, flex_limit_rad, spread_limit_rad,
     길이 10 벡터가 아니라 딕셔너리로 돌려주는 이유: 이번 실행에서
     일부 손가락만 활성화(ACTIVE_FINGERS)할 수 있어야 하고, 그때
     "몇 번째 칸이 몇 번 모터였지"를 세지 않아도 되게 하기 위해서다.
+
+    --- s 는 스칼라도 되고 {손가락이름: s} 도 된다 ---
+    벌림은 손가락 안에서 (m1+m2)/2 로 완결되므로 물리적으로 손가락마다
+    독립이다. 스칼라인 건 호출부 사정일 뿐이었다.
+
+    손가락별로 줄 수 있어야 하는 이유: 접촉을 못 찾은 손가락만 옆으로
+    훑어 파지 자리를 찾으려면, 이미 잡고 있는 손가락은 건드리지 말아야
+    한다. 같이 움직이면 마찰이 줄어 물체가 미끄러진다 -- 탐색이 파지를
+    깨뜨리는 셈이 된다.
+
+    맵에 없는 손가락은 0 이다. 조용히 옛 값을 유지하게 두면 지금 손이
+    어느 자세인지 이 함수의 입력만 보고는 알 수 없어진다.
     """
+    per_finger = isinstance(s, dict)
     pose = {}
     for finger in fingers:
+        s_here = s.get(finger.name, 0.0) if per_finger else s
         m1, m2 = finger_command(
-            a, s, finger, flex_limit_rad, spread_limit_rad,
+            a, s_here, finger, flex_limit_rad, spread_limit_rad,
             motor_min_rad, motor_max_rad,
         )
         for motor_id, angle in ((finger.id1, m1), (finger.id2, m2)):

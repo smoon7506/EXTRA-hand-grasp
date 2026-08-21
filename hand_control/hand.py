@@ -125,12 +125,25 @@ class Hand:
                 f"사용 가능한 이름: {sorted(known)}"
             )
 
+        # s 는 스칼라도 되고 {손가락이름: s} 도 된다. 벌림 탐색은 못 찾은
+        # 손가락만 옆으로 움직이고 잡고 있는 손가락은 안 건드리므로
+        # 손가락마다 다른 값이 나가야 한다(spread_seek 참고).
+        #
+        # hand_pose 에도 같은 규약이 있지만 여기는 그걸 안 거치고
+        # finger_command 를 직접 부른다 -- 그래서 따로 풀어야 한다.
+        # 2026-08-21 실물에서 이걸 빠뜨려 탐색이 시작되자마자 데몬이
+        # TypeError 로 죽었다.
+        per_finger = isinstance(s, dict)
+
         ids, values = [], []
         seen = {}
         for name, a in a_by_finger.items():
             finger = known[name]
+            # 맵에 없는 손가락은 0 이다. 조용히 옛 값을 유지하게 두면
+            # 지금 손이 어느 자세인지 입력만 보고는 알 수 없어진다.
+            s_here = s.get(name, 0.0) if per_finger else s
             m1, m2 = kinematics.finger_command(
-                a, s, finger,
+                a, s_here, finger,
                 hand_config.FLEX_LIMIT_RAD, hand_config.SPREAD_LIMIT_RAD,
                 hand_config.MOTOR_MIN_RAD, hand_config.MOTOR_MAX_RAD,
             )
