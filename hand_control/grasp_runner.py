@@ -18,6 +18,8 @@ import time
 import grasp
 import hand_config
 import sequence
+import spread_seek
+import stiffness
 from grasp import FingerGrasp, GraspParams
 from grasp_log import GraspLogger
 
@@ -39,6 +41,16 @@ class ForceGraspRunner:
 
         self.states = {}
         self.status = "busy"
+        # 손 전체의 대표 강성과 분류. 물체는 하나이므로 손가락마다 따로
+        # 갖지 않는다. k_hand 는 '지금까지 본 것 중 최대'라서 단조
+        # 증가하고, 그 결과 분류는 soft -> rigid 승격만 일어난다.
+        self.k_hand = None
+        self.object_class = None
+        # 벌림 탐색. seek_done 은 파지당 한 번만 훑기 위한 것이다 --
+        # 매번 다시 훑으면 손이 영원히 좌우로 떨린다.
+        self._seeker = None
+        self.seek_done = False
+        self.spread = hand_config.GRASP_SPREAD
         self.log_path = None
         self._log = None
         self._seq = None             # start_open() 에서 만든다
@@ -59,6 +71,11 @@ class ForceGraspRunner:
         self.close()
         self.states = {f.name: FingerGrasp(f.name, flex_span(f), self.params)
                        for f in self.fingers}
+        self.k_hand = None
+        self.object_class = None
+        self._seeker = None
+        self.seek_done = False
+        self.spread = hand_config.GRASP_SPREAD
         self._prev = {f.name: self.states[f.name].state for f in self.fingers}
         # 손가락별 출발 지연. grasp.py 는 순수 로직이라 스케줄링을
         # 모르므로 여기서 dt=0.0 을 먹여 APPROACH 를 제자리에 세워 둔다.
@@ -109,6 +126,115 @@ class ForceGraspRunner:
 
     # --- 진행 -----------------------------------------------------------
 
+    def _classify_hand(self):
+        """손가락들의 k_hat 을 모아 손 하나의 분류를 정하고 되돌려 준다.
+
+        --- 왜 손가락이 아니라 손 단위인가 ---
+        물체는 하나다. 손가락마다 rigid/soft 가 갈리면 같은 물체를
+        손가락마다 다른 힘으로 잡게 된다. 실측(2026-08-18/19)에서 같은
+        물체를 같이 잡은 손가락 사이 k_hat 편차가 2.3배, 한 런은
+        147배였다 -- 그 편차는 물체가 아니라 접촉 상태를 잰 것이다.
+
+        집계가 최대인 이유와 confident=False 를 빼는 이유는
+        stiffness.hand_k 주석에 있다.
+
+        --- 승격 전용 ---
+        k_hand 를 누적 최대로 들고 있으므로 분류는 soft -> rigid 로만
+        간다. 강등이 없어야 하는 이유: HOLD 에서 접촉이 끊긴 손가락은
+        APPROACH 로 돌아가 다시 프로빙하며 더 낮은 k_hat 을 낼 수
+        있는데, 그때 목표힘이 내려가면 잡고 있던 물체를 놓는다.
+        """
+        k = stiffness.hand_k(
+            (getattr(s, "k_hat", None), getattr(s, "confident", None))
+            for s in self.states.values())
+        if k is not None and (self.k_hand is None or k > self.k_hand):
+            self.k_hand = k
+        if self.k_hand is None:
+            return                      # 아직 아무도 못 쟀다
+
+        self.object_class = stiffness.classify(self.k_hand,
+                                               self.params.k_threshold)
+        f_target = (self.params.f_target_rigid
+                    if self.object_class == "rigid"
+                    else self.params.f_target_soft)
+        for state in self.states.values():
+            # 이미 같은 판정이면 건드리지 않는다. 매 사이클 덮어쓰면
+            # HOLD 의 stall 적응이 손가락별로 낮춰 둔 목표를 계속
+            # 되돌려서, 도달 불가능한 목표를 영영 쫓게 된다.
+            if getattr(state, "object_class", None) != self.object_class:
+                state.set_object(self.object_class, f_target)
+
+    @property
+    def seeking(self):
+        """지금 벌림을 훑는 중인가."""
+        return self._seeker is not None and not self._seeker.done
+
+    def _contacting(self):
+        """지금 물체를 쥐고 있는 손가락 이름들.
+
+        힘이 아니라 **상태**로 센다. HOLD 는 접촉을 touch_confirm_cycles
+        만큼 확인하고 들어간 자리이고, 순간적으로 힘이 꺼져도
+        contact_lost_cycles 동안은 버틴다. 힘으로 세면 그 노이즈가
+        그대로 들어와서, 안정 판정(HOLD/NO_CONTACT)과 접촉 판정이
+        같은 사이클에 서로 다른 말을 한다.
+
+        훑는 중의 점수는 반대로 힘으로 낸다(SpreadSeeker). 거기서는
+        "방금 옮긴 자리에서 닿았나"를 빨리 알아야 하는데 상태가 따라
+        오려면 몇 사이클이 걸린다.
+        """
+        return [n for n, s in self.states.items() if s.state == grasp.HOLD]
+
+    def _seek_spread(self, forces):
+        """벌림 탐색을 진행하고 이번에 명령할 벌림을 돌려준다.
+
+        --- 언제 시작하나 ---
+        손가락들이 자리를 잡았는데(HOLD/NO_CONTACT 로 안정) 접촉한
+        손가락이 SEEK_MIN_CONTACT 미만일 때다. 허공을 쥔 채로 끝내는
+        대신 옆을 훑어본다.
+
+        --- 왜 이게 슬립 대책인가 ---
+        2026-08-21 감사에서 슬립의 성격이 드러났다. HOLD 중 a 도 안 열리고
+        수직력도 안 주는데 물체가 빠진다 -- 마찰 부족이고, 62% 가 이미
+        a_max 포화라 힘으로는 못 올린다. 남은 레버가 접촉점 수다.
+
+        --- 왜 파지당 한 번인가 ---
+        끝난 뒤에도 계속 훑으면 손이 영원히 좌우로 떨린다.
+        """
+        if self._seeker is not None:
+            self._seeker.update(forces, self.params.f_touch)
+            if self._seeker.done:
+                # 최적점에 고정한다. 못 찾았으면 best_u 가 0 이라
+                # 제자리로 돌아간다 -- 헛되이 벌린 채로 두면 다음
+                # 파지가 그 자세에서 시작한다.
+                self.spread = self._seeker.best_spread()
+                if self._seeker.aborted:
+                    print("\n[WARN] 벌림 탐색 중 힘 상한을 넘어 멈췄습니다.")
+                self._seeker = None
+                self.seek_done = True
+                # 찾은 자리에서 실제로 물릴 시간을 준다. NO_CONTACT 는
+                # 힘이 touch_confirm_cycles 연속으로 잡혀야 되살아나는데,
+                # 여기서 바로 settled 로 넘기면 그 전에 상태기계가
+                # HOLDING 으로 가버려서 탐색이 아무것도 안 바꾼 셈이 된다.
+                self._stable = 0
+            else:
+                self.spread = self._seeker.spread
+            return
+
+        contacting = self._contacting()
+        if len(contacting) >= hand_config.SEEK_MIN_CONTACT:
+            self.seek_done = True       # 훑을 이유가 없다
+            return
+        seeking = [f.name for f in self.fingers if f.name not in contacting
+                   and f.spread_weight != 0.0]
+        if not seeking:
+            # 엄지는 spread_weight 가 0 이라 s 로는 안 움직인다. 훑을
+            # 손가락이 하나도 없으면 탐색이 의미가 없다.
+            self.seek_done = True
+            return
+        self._seeker = spread_seek.SpreadSeeker(
+            seeking, contacting, f_abort=self.params.f_abort)
+        self.spread = self._seeker.spread
+
     def tick(self):
         """한 사이클. -> "busy" | "settled" | "opened" | "abort"."""
         if self._mode is None:
@@ -125,6 +251,13 @@ class ForceGraspRunner:
             return self.status
 
         forces = self.sensors.read_forces()
+        # 전단력은 로그에만 쓴다. 슬립이 수직력에 안 보인다는 걸
+        # 2026-08-21 감사로 확인했는데, 임계값을 정할 실측이 한 줄도
+        # 없어서 먼저 쌓는다. read_shear 가 없는 구현이 남아 있어도
+        # 파지는 계속돼야 하므로 없으면 조용히 건너뛴다 -- 로깅이
+        # 제어를 막으면 안 된다.
+        read_shear = getattr(self.sensors, "read_shear", None)
+        shears = read_shear() if read_shear is not None else {}
         flexes = self.hand.read_flex()
         t = now - self._t0
 
@@ -136,7 +269,8 @@ class ForceGraspRunner:
                 forces.get(finger.name), flexes.get(finger.name),
                 now, finger_dt)
             self._log.row(t, state, forces.get(finger.name),
-                          flexes.get(finger.name))
+                          flexes.get(finger.name),
+                          shear=shears.get(finger.name))
             if state.state != self._prev[finger.name]:
                 if state.state == grasp.FROZEN:
                     print(f"\n[WARN] {finger.name} 이(가) FROZEN 상태로 "
@@ -147,7 +281,9 @@ class ForceGraspRunner:
                           f"복구됐습니다.")
                 self._prev[finger.name] = state.state
 
-        self.hand.set_pose_map(targets, s=hand_config.GRASP_SPREAD)
+        self._classify_hand()
+
+        self.hand.set_pose_map(targets, s=self.spread)
 
         # 온도는 1초에 한 번. 파지를 유지하면 서보가 계속 토크를 쓰므로
         # 실제로 발생한다. 이건 마지막 안전장치라 반드시 따라와야 한다.
@@ -180,6 +316,17 @@ class ForceGraspRunner:
             self._stable += 1
         else:
             self._stable = 0
+
+        # 자리를 잡았는데 접촉이 모자라면 옆을 훑어본다. 훑는 동안은
+        # settled 로 넘어가면 안 된다 -- 상태기계가 HOLDING 으로 가면
+        # 손이 움직이는 중에 '다 됐다'고 알리는 셈이다.
+        if (hand_config.SEEK_ENABLED and not self.seek_done
+                and self._stable >= hand_config.GRASP_STABLE_CYCLES):
+            self._seek_spread(forces)
+        if self.seeking:
+            self.status = "busy"
+            return self.status
+
         self.status = ("settled"
                        if self._stable >= hand_config.GRASP_STABLE_CYCLES
                        else "busy")
