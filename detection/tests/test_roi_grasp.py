@@ -791,3 +791,64 @@ def test_nudge_target_ignores_other_keys():
     roi = RoiConfig(x=0, y=0, w=10, h=10, near_m=0.20, far_m=0.26)
     assert nudge_target(roi, ord("q")) is False
 
+
+
+# --- 수동 파지 ---------------------------------------------------------
+#
+# ROI 트리거가 걸려야만 파지가 시작되면 반복 시험이 번거롭다. 사람이
+# 직접 걸 수 있어야 파지 로직(강성 분류, 벌림 탐색)을 카메라 조건과
+# 무관하게 시험할 수 있다.
+
+
+def test_수동_파지는_ARMED에서_곧바로_GRASPING(self=None):
+    m, seq, _ = make_machine()
+    assert m.request_grasp() is True
+    assert m.state == GRASPING
+    assert seq.starts == [(0.8, 0.0)]
+
+
+def test_수동_파지는_쿨다운을_무시한다():
+    # 사람이 명시적으로 누른 것이다. 쿨다운은 "물체가 남아 있어서 자동
+    # 재파지되는 것"을 막는 장치이고, 사람의 의도를 막을 이유는 없다.
+    m, _, clock = make_machine(rearm=3.0)
+    m.abort_to_armed()
+    assert m.rearm_remaining() > 0
+    assert m.request_grasp() is True
+    assert m.state == GRASPING
+
+
+def test_수동_파지는_무장_해제_중에도_된다():
+    # disarm 은 "새 파지를 자동으로 시작하지 않는다"이다. 사람이 직접
+    # 누르는 것은 화면을 보고 있다는 증거 자체다.
+    m, _, _ = make_machine()
+    m.disarm()
+    assert m.request_grasp() is True
+    assert m.state == GRASPING
+
+
+def test_수동_파지는_정렬_중에도_가로챈다():
+    # "정렬 됐든 안 됐든 지금 잡아라". 브링업에서 자주 쓰는 경로다.
+    m, _, _ = make_machine()
+    m.update(HIT)
+    assert m.state == CONFIRMING
+    assert m.request_grasp() is True
+    assert m.state == GRASPING
+
+
+def test_잡고_있을_때는_수동_파지를_거절한다():
+    # 진행 중인 파지를 다시 시작하면 손가락이 반쯤 닫힌 채로 상태가
+    # 초기화되어 물체에 끼인다.
+    m, seq, _ = make_machine()
+    grasp_from_armed(m)
+    before = len(seq.starts)
+    assert m.request_grasp() is False
+    assert len(seq.starts) == before
+
+
+def test_수동_파지_뒤_트리거가_비어_있다():
+    # 안 지우면 파지가 끝나고 ARMED 로 돌아온 첫 프레임에 옛 연속
+    # 프레임이 남아 곧바로 자동 재파지된다.
+    m, _, _ = make_machine(enter_frames=2)
+    m.update(HIT)                 # 연속 프레임 1 쌓임
+    m.request_grasp()
+    assert m.trigger.active is False

@@ -32,6 +32,10 @@ class FakeMachine:
         self.calls.append("release")
         return self.state == "HOLDING"
 
+    def request_grasp(self):
+        self.calls.append("grasp")
+        return self.state in ("ARMED", "ALIGNING", "CONFIRMING")
+
     def emergency_open(self):
         self.calls.append("emergency_open")
 
@@ -167,3 +171,23 @@ def test_ping_is_acked_cheaply():
     h, _ = make()
     ack = h.handle({"cmd": "ping", "seq": 42})
     assert ack["ok"] is True and ack["seq"] == 42
+
+
+# --- 수동 파지 ---------------------------------------------------------
+
+
+def test_grasp_starts_a_grasp_from_armed():
+    h, state = make()
+    ack = h.handle({"cmd": "grasp"})
+    assert ack["ok"] is True
+    assert state.machine.calls == ["grasp"]
+
+
+def test_grasp_is_refused_while_already_grasping():
+    # 진행 중인 파지를 다시 시작하면 손가락이 반쯤 닫힌 채로 상태가
+    # 초기화되어 물체에 끼인다. 거절 사유가 화면에 떠야 한다.
+    h, state = make()
+    state.machine.state = "HOLDING"
+    ack = h.handle({"cmd": "grasp"})
+    assert ack["ok"] is False
+    assert "HOLDING" in ack["msg"]

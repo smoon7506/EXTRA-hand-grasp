@@ -63,3 +63,9 @@ def test_release_and_emergency():
 def test_unmapped_key_is_none():
     assert key_to_command(ord("z")) is None
     assert key_to_command(255) is None
+
+
+def test_g는_수동_파지다():
+    # ROI 트리거를 안 기다리고 지금 잡는다. 파지 안쪽 로직을 고칠 때
+    # 카메라 조건을 매번 맞추지 않으려면 이 경로가 필요하다.
+    assert key_to_command(ord("g")) == {"cmd": "grasp"}

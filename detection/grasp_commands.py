@@ -196,6 +196,19 @@ class CommandHandler:
         ok, why = self.s.on_jog_wrist(int(msg.get("dir", 1)))
         return (_ok if ok else _no)("jog_wrist", why)
 
+    def _do_grasp(self, msg):
+        """사람이 직접 거는 파지. ROI 판정을 안 기다린다.
+
+        무장 해제나 쿨다운 중에도 받는다 -- 그 둘은 '자동으로' 새
+        파지를 시작하지 않기 위한 장치라 사람의 의도를 막을 이유가
+        없다. 판단은 상태기계가 한다(request_grasp 주석 참고).
+        """
+        if self.s.machine.request_grasp():
+            return _ok("grasp", "파지 시작")
+        return _no("grasp",
+                   f"지금은 파지를 시작할 수 없다 "
+                   f"(상태 {self.s.machine.state}).")
+
     def _do_release(self, msg):
         if self.s.machine.request_release():
             return _ok("release", "놓는다")

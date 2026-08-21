@@ -283,6 +283,35 @@ class GraspStateMachine:
         """
         return max(0.0, self._rearm_at - self._clock())
 
+    def request_grasp(self):
+        """g 키 / GRASP 버튼. 지금 곧바로 파지한다. -> 받았나.
+
+        ROI 트리거가 걸려야만 파지가 시작되면 반복 시험이 번거롭다.
+        강성 분류나 벌림 탐색처럼 파지 안쪽 로직을 고칠 때, 카메라
+        조건을 매번 맞추지 않고 바로 걸 수 있어야 한다.
+
+        --- 무장 해제와 쿨다운을 무시하는 이유 ---
+        둘 다 "자동으로 새 파지를 시작하지 않는다"를 위한 장치다.
+        disarm 은 사람이 화면을 안 볼 때를, 쿨다운은 놓자마자 같은
+        물체를 다시 잡는 것을 막는다. 사람이 직접 누른 것은 그 두
+        상황 어느 쪽도 아니다 -- emergency_open 과 같은 성질이다.
+
+        --- 진행 중인 파지는 거절한다 ---
+        GRASPING/HOLDING/RELEASING 에서 다시 시작하면 손가락이 반쯤
+        닫힌 채로 상태가 초기화되어 물체에 끼인다. disarm() 이 진행 중인
+        동작을 안 건드리는 것과 같은 이유다.
+        """
+        if self.state not in (ARMED, ALIGNING, CONFIRMING):
+            return False
+        # 안 지우면 파지가 끝나고 ARMED 로 돌아온 첫 프레임에 옛 연속
+        # 프레임이 남아 곧바로 자동 재파지된다.
+        self.trigger.reset()
+        self._confirm_until = None
+        self.wrist_goal_rad = None
+        self.executor.start_grasp()
+        self.state = GRASPING
+        return True
+
     def request_release(self):
         """r 키. 잡고 있을 때만 받아들인다.
 

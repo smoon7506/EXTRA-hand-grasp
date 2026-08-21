@@ -29,6 +29,7 @@ def to_source(box, view_w, view_h, src_w, src_h):
 _KEYS = {
     "n": {"cmd": "calib_band", "edge": "near"},
     "f": {"cmd": "calib_band", "edge": "far"},
+    "g": {"cmd": "grasp"},
     "t": {"cmd": "capture_target"},
     "h": {"cmd": "save_hand_mask"},
     "[": {"cmd": "nudge_band", "edge": "near", "delta_m": -NUDGE_M},
