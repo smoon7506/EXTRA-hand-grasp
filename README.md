@@ -59,9 +59,10 @@ pip install -r requirements.txt
 `pyrealsense2` 소스 빌드와 CH341 커널 모듈이 더 필요하다 —
 **`docs/pi-setup.md` 를 따라간다.** 거기 함정이 몇 개 있다.
 
-촉각 센서 SDK(Tashan capRead)는 이 저장소에 없다. 센서와 같이 받은 것을 쓰고
-경로를 알려준다(`export CAPREAD_DIR=...`). 없으면 `--simple-grasp` 로 촉각 없이
-돌릴 수 있다.
+촉각 센서 SDK(Tashan capRead)는 이 저장소에 없다. `vendor/capRead` 에 풀거나
+경로를 알려주면 된다(`export CAPREAD_DIR=...`). **절차는 `docs/tactile-sdk.md`**
+— 파이에서는 커널 모듈 빌드가 더 필요하고 함정이 몇 개 있다.
+없으면 `--simple-grasp` 로 촉각 없이 돌릴 수 있다.
 
 ### PC (윈도우)
 
@@ -74,12 +75,41 @@ pip install numpy opencv-python
 
 ---
 
+## 코드를 파이에 보내기
+
+파이에 git 이 있으면 `git pull` 이 제일 깔끔하다. 네트워크가 없거나 아직 커밋 전
+코드를 시험할 때는 배포 스크립트를 쓴다.
+
+```powershell
+.\deploy_pi.ps1 -DryRun     # 무엇이 갈지 먼저 본다
+.\deploy_pi.ps1             # 보낸다
+```
+
+```bash
+./deploy_pi.sh --dry-run     # 파이·맥에서는 이쪽
+./deploy_pi.sh
+```
+
+둘은 같은 `pi_manifest.txt` 를 읽는다. **보낼 목록을 스크립트 밖에 둔 이유는
+git diff 에 "무엇을 파이로 보내는가"의 변화가 보이게 하려고**다.
+
+`scp -r` 을 직접 쓰지 않는다. `logs/` 와 `__pycache__` 까지 딸려 가 16.8MB 가 되고,
+실제로 그러다 전송이 실패한 적이 있다. 매니페스트를 거치면 196KB 다.
+
+**파이에만 있는 것은 안 덮는다** — `vendor/`(aarch64 로 고친 드라이버), `venv/`,
+`detection/roi.json`·`hand_mask.npy`(파이가 잡은 캘리브레이션). 매니페스트에
+없으면 손대지 않는다.
+
+자세한 것은 `docs/pi-deploy.md`.
+
+---
+
 ## 어느 파일이 어디서 도나
 
 | 어디서 | 파일 |
 |---|---|
-| **파이에서만** | `detection/` — `grasp_daemon` `roi_judge` `orientation` `wrist_align` `grasp_state` `grasp_commands` `roi_grasp`<br>`hand_control/` — **전부**<br>`config/r_hand.toml` |
-| **PC 에서만** | `detection/` — `grasp_console` `console_input` |
+| **파이에서만** | `detection/` — `grasp_daemon` `roi_judge` `orientation` `wrist_align` `grasp_state` `grasp_commands` `roi_grasp`<br>`hand_control/` — **전부**<br>`config/r_hand.toml`, `vendor/capRead` |
+| **PC 에서만** | `detection/` — `grasp_console` `console_input` `dashboard/` |
 | **양쪽 공용** | `detection/` — `link` `link_sender` `roi_config` |
 
 `hand_control/` 은 통째로 파이 쪽이다. 모터와 촉각 센서를 만지는 코드라 PC 에는
@@ -130,6 +160,36 @@ python grasp_console.py --host <파이IP>
 처음이면 **`docs/pi-run.md` 의 4단계 브링업**을 따라간다. 한 번에 다 붙이면
 안 될 때 원인을 못 가린다.
 
+### 화면
+
+```
+┌─────────────────────────┬──────────────────┐
+│                         │ HAND FORCE       │
+│      CAMERA + ROI       │  total  2.41 N v │
+│                         │  contact 3/5     │
+│   state: HOLDING        │ f1 ███████  1.02 │
+│   angle 3°  wrist 12°   │ f4 ██████████1.52│
+│                         │ f5 n/a           │
+│                         │  (최근 8초 그래프) │
+├─────────────────────────┴──────────────────┤
+│ [ARM][ALIGN][GRASP][RELEASE][OPEN!] …      │
+└────────────────────────────────────────────┘
+```
+
+오른쪽 촉각 패널이 갈리는 세 가지:
+
+| 표시 | 뜻 |
+|---|---|
+| 손가락 막대와 숫자 | 정상 |
+| `no force in telemetry` | 데몬이 옛 버전. 배포하고 **재시작**했는지 |
+| `sensor off` | 데몬은 새것인데 센서가 없다 (`docs/tactile-sdk.md`) |
+
+**`n/a` 는 그 채널이 끊긴 것이다.** `0.00`(안 눌림)과 다르다 — 둘을 같게 그리면
+"손이 멀쩡한데 왜 반응이 없나"에서 막힌다.
+
+`total` 옆 화살표와 아래 그래프는 최근 8초 추세다. 슬립도 센서 드리프트도
+순간값에는 안 보인다.
+
 ### 키
 
 | 키 | | 키 | |
@@ -140,7 +200,10 @@ python grasp_console.py --host <파이IP>
 | `n` `f` | 밴드 near/far 캘리브레이션 | `w` `W` | 손목 수동 조그 |
 | `[` `]` | near ±5mm | `r` | 놓기 |
 | `-` `=` | far ±5mm | `space` | **비상 폄** |
-| | | `q` | 콘솔 종료 (데몬은 계속 산다) |
+| `g` | **지금 잡는다** (ROI 판정 안 기다림) | `q` | 콘솔 종료 (데몬은 계속 산다) |
+
+**버튼으로도 된다.** 창 아래 버튼바가 키와 **같은 명령**을 보낸다 — 둘 다 살아
+있다. `ARM`/`ALIGN` 은 켜져 있으면 초록으로 바뀐다.
 
 ---
 
@@ -161,6 +224,7 @@ python grasp_console.py --host <파이IP>
 | 통신 | `link` (프로토콜) `link_sender` (막히면 버림) `link_watchdog` (끊김 대응) `grasp_commands` (명령→동작) |
 | 판정 | `roi_judge` (깊이→물체 유무) `orientation` (장축 각도) `wrist_align` (각도→손목 goal) `grasp_state` (상태기계) |
 | 설정·입력 | `roi_config` (ROI·밴드·목표각) `console_input` (키·좌표 환산) |
+| 화면 (PC) | `dashboard/` — `layout` (창 분할) `buttons` (버튼·명령) `panels` (촉각 패널). 앞 둘은 cv2 를 몰라 창 없이 테스트된다 |
 | 기준선 | `roi_grasp.py` — 아래 참고 |
 
 판정 4개는 **하드웨어도 화면도 네트워크도 모른다.** 그래서 카메라 없이 전부 테스트된다.
@@ -170,9 +234,9 @@ python grasp_console.py --host <파이IP>
 | 묶음 | 파일 |
 |---|---|
 | 하드웨어 | `hand` (손 10모터) `wrist` (STS3215) `servo_bus` (포트 시분할) `tactile` (촉각 5개) |
-| 파지 | `grasp_runner` `grasp` `force_control` `stiffness` `sequence` `grasp_log` |
+| 파지 | `grasp_runner` `grasp` `force_control` `stiffness` `spread_seek` `sequence` `grasp_log` |
 | 계산·설정 | `kinematics` `hand_config` |
-| 도구 | `main.py` (수동 조작) `servo_id_tool.py` (서보 ID 변경) |
+| 도구 | `main.py` (수동 조작) `grasp_main.py` (센서 진단·수동 파지) `servo_id_tool.py` (서보 ID 변경) |
 
 ### `config/r_hand.toml`
 
@@ -239,6 +303,48 @@ grep -c "^def band_ratio" detection/roi_grasp.py   # 0 이어야 정상
 
 ---
 
+## 파지는 스스로 안 끝난다
+
+`HOLDING` 에 종료 조건이 없다. 끝나는 길은 다섯이고 **전부 외부 요인**이다:
+
+1. `r` / RELEASE
+2. `space` / OPEN!
+3. 모터 온도 한계 초과 (1초마다 확인)
+4. 온도 읽기 연속 실패 — 과열을 감시할 수 없으므로 중단
+5. 링크 끊김 (아래)
+
+3·4 는 물체가 아니라 **모터를 보호**하는 것이다. 파지의 성공/실패는 아직 아무도
+판정하지 않는다 — 물체를 놓쳐도 상태기계는 `HOLDING` 에 남는다. 그래서 화면의
+`contact n/5` 를 사람이 봐야 한다.
+
+---
+
+## 촉각이 하는 일
+
+물체가 얼마나 딱딱한지 스스로 판단하고, 손가락마다 독립된 힘 루프를 돌린다.
+
+**분류는 손 단위다.** 물체는 하나인데 손가락마다 rigid/soft 가 갈리면 같은 물체를
+다른 힘으로 잡는다. 집계는 평균이 아니라 **최대**다 — 스치듯 닿은 손가락은 물체가
+아니라 자기 접촉을 재서 낮은 값을 주고, 강체의 증거("밀었는데 안 들어간다")는
+제대로 닿은 손가락 하나로 성립한다.
+
+측정에 실패한 손가락(`confident=False`)은 집계에서 **뺀다.** 실패 시 `k_max` 가
+들어가는데 그건 "가장 보수적인 분모"라는 뜻이지 "아주 단단하다"가 아니다. 그대로
+쓰면 손가락 하나만 실패해도 손 전체가 항상 rigid 가 된다.
+
+**접촉이 모자라면 벌림을 훑는다**(`spread_seek`). 못 찾은 손가락만 옆으로 움직이고
+잡고 있는 손가락은 `a` 도 `s` 도 건드리지 않는다 — 같이 움직이면 마찰이 줄어 잡고
+있던 물체를 놓는다. 벌림이 손가락 안에서 `(m1+m2)/2` 로 완결되기 때문에 가능하다.
+
+**전단력(`tf`)은 로그에만 쓴다.** 슬립은 접촉면의 전단 현상이라 수직력에는 잘 안
+보이는데, 임계값을 정할 실측이 아직 없다. 먼저 쌓는 중이다.
+
+임계값 몇 개는 **미검증**이다: `K_THRESHOLD`, `SEEK_MIN_CONTACT`, `spread_seek` 의
+계단 크기. 근거와 한계는 각 상수 주석에 적혀 있다. 실물에서 손가락이 물체를
+밀어내면 `SEEK_ENABLED = False` 로 끈다.
+
+---
+
 ## 링크가 끊기면
 
 PC 가 2초간 아무것도 안 보내면 끊긴 것으로 본다(30Hz 기준 60프레임).
@@ -279,8 +385,8 @@ export HAND_SERIAL_PORT=/dev/ttyUSB1
 ## 테스트 — 고치기 전에 이것부터
 
 ```bash
-cd detection     && python -m pytest tests/ -q    # 184개
-cd hand_control  && python -m pytest tests/ -q    # 258개
+cd detection     && python -m pytest tests/ -q    # 236개
+cd hand_control  && python -m pytest tests/ -q    # 303개
 ```
 
 전부 **하드웨어 없이** 돈다. 카메라도 모터도 없는 노트북에서 몇 초면 끝난다.
@@ -323,6 +429,8 @@ python -m pytest tests/ -q --collect-only    # 무엇을 보장하는지 목록�
 |---|---|
 | `docs/pi-setup.md` | 파이 사전 준비. rustypot / librealsense / CH341 커널 모듈 / USB 권한 |
 | `docs/pi-run.md` | 4단계 브링업과 문제 해결 |
+| `docs/pi-deploy.md` | **무엇을 파이에 보내고 어떻게 굴리나.** 파일 목록·배포·조작 |
+| `docs/tactile-sdk.md` | 촉각 SDK 붙이기. `vendor/capRead`, 커널 모듈, 진단 |
 | `docs/design.md` | **왜 이렇게 나눴는지.** 연산 측정치, ESP32 를 뺀 이유, 계약 설계 |
 
 ---
@@ -330,15 +438,19 @@ python -m pytest tests/ -q --collect-only    # 무엇을 보장하는지 목록�
 ## 이 저장소에 없는 것
 
 **촉각 센서 SDK.** Tashan 센서와 WCH CH341 칩의 드라이버는 각 제조사 것이라
-재배포하지 않는다. 센서를 살 때 같이 받은 것을 쓰고 경로만 알려준다:
+재배포하지 않는다. 인수인계 때 `tactile-sdk-backup.zip` 으로 따로 준다.
 
 ```bash
-export CAPREAD_DIR=~/capRead_Python-win\&Linux-64bit
+mkdir -p vendor
+cp -r "/경로/tactile-sdk-backup/capRead_Python-win&Linux-64bit" vendor/capRead
 ```
 
-리눅스에서는 라이브러리만으로 부족하고 CH341 커널 모듈을 직접 빌드해야 한다
-(`docs/pi-setup.md` 3장). 센서가 없거나 SDK 가 없으면 `--simple-grasp` 로
-촉각 없이 고정 자세 파지를 쓸 수 있다 — 나머지는 전부 정상 동작한다.
+`vendor/` 는 `.gitignore` 에 있어서 커밋되지 않는다. 리눅스에서는 라이브러리만으로
+부족하고 CH341 커널 모듈을 직접 빌드해야 한다. **절차와 함정은
+`docs/tactile-sdk.md`.**
+
+센서가 없거나 SDK 가 없으면 `--simple-grasp` 로 촉각 없이 고정 자세 파지를 쓸 수
+있다 — 나머지는 전부 정상 동작한다.
 
 **MuJoCo 시뮬레이션 씬.** 파지에 필요 없고 파일이 커서 뺐다.
 
