@@ -10,3 +10,7 @@ detection/hand_mask.npy
 detection/backup/
 logs/
 out/
+
+# 벤더 SDK (Tashan capRead, WCH CH341). 제조사 소프트웨어라 재배포하지
+# 않는다 -- 여기 두더라도 절대 커밋되면 안 된다. docs/tactile-sdk.md 참고.
+vendor/
