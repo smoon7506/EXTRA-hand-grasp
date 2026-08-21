@@ -93,7 +93,7 @@ class Listener:
 
 def build_telemetry(seq, state, roi, ratio, valid, median, angle,
                     angle_reason, axis, wrist_deg, machine, watchdog,
-                    has_hand_mask, bus_owner):
+                    has_hand_mask, bus_owner, forces=None):
     """매 프레임 한 장. roi 와 cfg 를 통째로 실어 콘솔을 스테이트리스로 둔다.
 
     cfg 를 싣는 이유: 지금 draw_overlay 가 ENTER_RATIO 상수를 직접 읽어
@@ -115,12 +115,20 @@ def build_telemetry(seq, state, roi, ratio, valid, median, angle,
         "release_in": watchdog.release_in(),
         "has_hand_mask": has_hand_mask,
         "bus_owner": bus_owner,
+        # 손가락별 파지력(N). 못 읽은 손가락은 None 이고, 센서가 아예
+        # 없으면(--simple-grasp / --no-hand) 빈 dict 다. 셋을 구분해야
+        # 콘솔이 '안 눌림'과 '센서 없음'을 다르게 그릴 수 있다.
+        "forces": dict(forces or {}),
         "roi": (None if roi is None else {
             "x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h,
             "near_m": roi.near_m, "far_m": roi.far_m,
             "target_angle_deg": roi.target_angle_deg}),
+        # f_touch 를 여기 싣는 이유는 위 세 값과 같다 -- 접촉 개수는
+        # 콘솔이 세는데, 콘솔이 자기 hand_config 에서 임계값을 읽으면
+        # 파이와 PC 의 값이 조용히 어긋난다.
         "cfg": {"enter_ratio": ENTER_RATIO, "exit_ratio": EXIT_RATIO,
-                "min_valid_ratio": MIN_VALID_RATIO},
+                "min_valid_ratio": MIN_VALID_RATIO,
+                "f_touch": hand_config.F_TOUCH},
     }
 
 
@@ -429,12 +437,16 @@ def main():
                     wrist_deg = np.degrees(current)
 
             # --- 올려보내기 (막히면 버린다) ---
+            # 촉각은 CH341 이라 시리얼 리스와 무관하다. 어느 상태에서든
+            # 읽을 수 있으므로 파지 중이 아니어도 화면에 계속 띄운다 --
+            # 손에 뭐가 닿아 있는지를 ARMED 에서도 봐야 한다.
             tel = build_telemetry(
                 seq=seq, state=state, roi=roi, ratio=ratio, valid=valid,
                 median=median, angle=angle, angle_reason=angle_reason,
                 axis=axis, wrist_deg=wrist_deg, machine=machine,
                 watchdog=watchdog, has_hand_mask=box["hand_mask"] is not None,
-                bus_owner=bus.owner())
+                bus_owner=bus.owner(),
+                forces=(sensors.read_forces() if sensors is not None else {}))
             # 나가다 만 꼬리부터 밀어낸다. 이걸 안 부르면 꼬리가 영영
             # 안 나가고 그동안 새 프레임이 전부 버려진다.
             ctl_sender.flush()

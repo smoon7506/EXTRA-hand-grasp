@@ -16,9 +16,11 @@ ROI/밴드/각도/상태기계는 전부 grasp_daemon.py(파이) 쪽에 있다. 
 """
 
 import argparse
+import collections
 import json
 import socket
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -26,6 +28,9 @@ import numpy as np
 
 import orientation
 from console_input import key_to_command, to_source
+from dashboard import buttons as dash_buttons
+from dashboard import layout as dash_layout
+from dashboard import panels as dash_panels
 from link import PROTO, LineReader, LinkError, PreviewReader, encode_msg
 
 try:
@@ -40,6 +45,10 @@ PREVIEW_PORT = 5002
 # pending 에 쌓아 두는 텔레메트리 상한. 넘으면 오래된 것부터 버린다 --
 # 미리보기가 한동안 안 오면(연결 끊김 등) pending 이 무한정 자란다.
 MAX_PENDING = 32
+
+# 합계 파지력 이력을 몇 초에 한 번 담나. 스파크라인 창(panels.TREND_S)을
+# 이 간격으로 나눈 만큼이 화면에 남는다.
+_FORCE_SAMPLE_S = 0.1
 
 # 화면 색 (BGR). roi_grasp.py:112-124 를 그대로 옮겼다.
 _GREEN = (0, 255, 0)
@@ -56,9 +65,66 @@ _STATE_COLOR = {
     "RELEASING": _YELLOW,
 }
 
-_HINT = ("drag=ROI  n/f=band  []-= nudge  t=target ,.=tweak  "
-         "w/W=wrist  h=hand mask  a=align  m=arm  r=release  "
-         "space=open  q=quit")
+# 버튼바가 생긴 뒤로는 힌트가 짧아야 한다. 버튼에 없는 것(드래그,
+# 종료)과 "키도 그대로 된다"만 남긴다 -- 길면 미리보기 폭에서
+# 잘려서 정작 마지막 항목이 안 보인다.
+_HINT = "drag=ROI   g=grasp   q=quit   (keys still work)"
+
+
+class MouseRouter:
+    """마우스 이벤트를 미리보기(ROI 드래그)와 버튼바로 가른다.
+
+    한 창에 둘이 같이 있어서 라우팅이 없으면 버튼을 누른 것이 ROI
+    드래그 시작으로도 잡힌다 -- 버튼 한 번에 명령이 나가면서 ROI 까지
+    바뀐다.
+
+    가르는 기준은 **누른 자리**다. 커서가 지금 어디 있는지로 매번
+    다시 정하면, 미리보기에서 끌기 시작해 버튼바 위에서 놓았을 때
+    드래그가 중간에 사라진다.
+
+    버튼은 누를 때가 아니라 **뗄 때** 발화한다. 잘못 눌렀을 때 밖으로
+    끌어서 취소할 수 있어야 해서다 -- 비상 정지 옆에 다른 버튼이 있는
+    배치라 이게 필요하다.
+    """
+
+    def __init__(self, dragger):
+        self.dragger = dragger
+        self.placed = []            # 지금 배치된 Button 들
+        self.owner = None           # "preview" | "bar" | None
+        self.pressed = None         # 누르고 있는 Button
+        self.clicked = None         # 발화한 Button. 루프가 읽고 지운다
+
+    def on_mouse(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            pressed = dash_buttons.hit(self.placed, x, y)
+            self.owner = "bar" if pressed is not None else "preview"
+            self.pressed = pressed
+
+        if self.owner == "bar":
+            if event == cv2.EVENT_LBUTTONUP:
+                # 같은 버튼인지는 **id 로** 본다. 객체 동일성으로 보면
+                # 안 된다 -- 렌더 루프가 매 프레임 place() 를 다시 불러
+                # placed 를 통째로 새 객체로 갈아치우므로, 누른 시점과
+                # 뗀 시점 사이에 한 프레임만 지나도 is 가 영원히 False 다
+                # (2026-08-21 실물에서 버튼이 하나도 안 먹은 원인).
+                under = dash_buttons.hit(self.placed, x, y)
+                if (self.pressed is not None and under is not None
+                        and under.id == self.pressed.id):
+                    self.clicked = under
+                self.owner, self.pressed = None, None
+            return
+
+        self.dragger.on_mouse(event, x, y, flags, param)
+        if event == cv2.EVENT_LBUTTONUP:
+            self.owner = None
+
+    def take_click(self):
+        """발화한 버튼을 한 번만 돌려준다.
+
+        안 지우면 루프가 매 프레임 읽어서 같은 명령이 계속 나간다.
+        """
+        button, self.clicked = self.clicked, None
+        return button
 
 
 class RoiDragger:
@@ -96,6 +162,48 @@ class RoiDragger:
         x0, y0 = self.start
         x1, y1 = self.current
         return (min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+
+
+_BAR_BG = (24, 24, 24)
+_BTN = (64, 64, 64)
+_BTN_DOWN = (110, 110, 110)
+_BTN_DANGER = (40, 40, 150)
+_BTN_ON = (40, 110, 40)
+
+
+def draw_buttons(canvas, bar_rect, placed, tel, pressed=None):
+    """버튼바를 그린다.
+
+    토글(ARM/ALIGN)은 지금 켜져 있으면 배경을 바꾼다. 라벨만 있으면
+    누르기 전에 지금 상태가 뭔지 알 수 없어서, 무장된 줄 모르고 한 번 더
+    눌러 해제하는 일이 생긴다.
+    """
+    bx, by, bw, bh = bar_rect
+    cv2.rectangle(canvas, (bx, by), (bx + bw, by + bh), _BAR_BG, -1)
+    on = {"arm": bool(tel.get("armed")),
+          "align": bool(tel.get("align_on", True))}
+    # 눌린 표시도 id 로 본다. placed 가 매 프레임 새 객체라 객체
+    # 동일성으로 보면 눌러도 색이 안 변한다 -- 위 MouseRouter 와 같은
+    # 이유이고, 같이 안 고치면 "눌리긴 했나"를 화면에서 알 수 없다.
+    pressed_id = getattr(pressed, "id", None)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for b in placed:
+        x, y, w, h = b.rect
+        if b.id == pressed_id:
+            color = _BTN_DOWN
+        elif b.kind == "danger":
+            color = _BTN_DANGER
+        elif on.get(b.id):
+            color = _BTN_ON
+        else:
+            color = _BTN
+        cv2.rectangle(canvas, (x, y), (x + w, y + h), color, -1)
+        cv2.rectangle(canvas, (x, y), (x + w, y + h), (90, 90, 90), 1)
+        scale = 0.45 if len(b.label) > 6 else 0.5
+        (tw, th), _ = cv2.getTextSize(b.label, font, scale, 1)
+        cv2.putText(canvas, b.label,
+                    (x + (w - tw) // 2, y + (h + th) // 2),
+                    font, scale, _WHITE, 1)
 
 
 def draw_overlay(image, tel, mask, hint, scale=1.0):
@@ -145,11 +253,11 @@ def draw_overlay(image, tel, mask, hint, scale=1.0):
         lines.append("drag to set ROI")
     else:
         lines.append(f"band: {roi['near_m']:.3f} ~ {roi['far_m']:.3f} m")
-        ratio = tel.get("ratio")
-        lines.append(
-            "ratio: --" if ratio is None else
-            f"ratio: {ratio:5.2f}  (enter {cfg.get('enter_ratio', 0.0):.2f}"
-            f" / exit {cfg.get('exit_ratio', 0.0):.2f})")
+        # ratio 숫자는 안 띄운다. ROI 초록 틴트와 state 색이 이미 같은
+        # 것을 보여주고, 화면에 숫자가 많을수록 정작 봐야 할 것을 놓친다.
+        # 아래 valid 경고는 남긴다 -- 그건 "물체 없음"과 "센서가 못 봄"을
+        # 가르는 유일한 표시라, 없으면 카메라가 Min-Z 안으로 들어왔을 때
+        # 원인을 못 찾는다.
         median = tel.get("median")
         lines.append(
             "median: --" if median is None else f"median: {median:.3f} m")
@@ -280,6 +388,13 @@ def main():
     pv.setblocking(False)
     ctl_reader, pv_reader = LineReader(), PreviewReader()
     dragger = RoiDragger()
+    router = MouseRouter(dragger)
+    # 합계 파지력 이력. 슬립도 센서 드리프트도 순간값에는 안 보인다.
+    # 창 길이는 초 단위로 정하고 프레임 수는 실측 간격으로 채운다 --
+    # 데몬 fps 가 달라져도 화면의 "8초"가 8초로 남는다.
+    force_history = collections.deque(
+        maxlen=int(dash_panels.TREND_S / _FORCE_SAMPLE_S))
+    last_force_at = 0.0
 
     # tel/image/mask 는 "지금 화면에 보이는" 세 짝이다. seq 로 맞춘
     # 미리보기가 올 때만 셋이 같이 바뀐다 -- 안 그러면 그림과 숫자가
@@ -299,7 +414,7 @@ def main():
 
     window = "ROI grasp (console)"
     cv2.namedWindow(window)
-    cv2.setMouseCallback(window, dragger.on_mouse)
+    cv2.setMouseCallback(window, router.on_mouse)
     print(f"[INFO] 접속됨. {_HINT}")
 
     try:
@@ -350,6 +465,19 @@ def main():
                         if new_image is None:
                             continue
                         tel, image, mask = matched, new_image, new_mask
+                        # 합계 파지력 이력. 프레임마다 넣으면 데몬 fps 에
+                        # 따라 화면의 "8초"가 8초가 아니게 되므로 실제
+                        # 시각으로 솎는다.
+                        now = time.monotonic()
+                        if now - last_force_at >= _FORCE_SAMPLE_S:
+                            last_force_at = now
+                            summary = dash_panels.summarize(
+                                tel.get("forces") or {},
+                                (tel.get("cfg") or {}).get("f_touch", 0.3))
+                            # 못 읽었으면 이력을 건너뛴다. 0 을 넣으면
+                            # 스파크라인에 없던 골짜기가 생긴다.
+                            if summary.total is not None:
+                                force_history.append(summary.total)
                 except LinkError as e:
                     print(f"[WARN] 미리보기 프로토콜이 깨졌다: {e}")
                     break
@@ -380,7 +508,37 @@ def main():
                     cv2.rectangle(display, (box[0], box[1]),
                                   (box[0] + box[2], box[1] + box[3]),
                                   _YELLOW, 1)
-                cv2.imshow(window, display)
+
+                # --- 대시보드 합성 ---
+                # 미리보기는 받은 크기 그대로 왼쪽 위에 붙인다. 늘리거나
+                # 줄이면 to_source() 의 좌표 환산이 어긋나서, 화면에는
+                # 맞게 보이는데 데몬이 엉뚱한 픽셀을 잰다.
+                ph, pw = display.shape[:2]
+                rects = dash_layout.split(pw, ph)
+                win_w, win_h = dash_layout.window_size(pw, ph)
+                canvas = np.zeros((win_h, win_w, 3), np.uint8)
+                canvas[0:ph, 0:pw] = display
+
+                cfg = (tel or {}).get("cfg") or {}
+                # `or {}` 로 뭉개면 안 된다. 키 없음(옛 데몬)과 빈
+                # dict(센서 없음)를 패널이 갈라서 그린다.
+                forces = (tel or {}).get("forces")
+                dash_panels.draw(canvas, rects["panel"], forces,
+                                 cfg.get("f_touch", 0.3), list(force_history))
+                router.placed = dash_buttons.place(rects["bar"])
+                draw_buttons(canvas, rects["bar"], router.placed,
+                             tel or {}, router.pressed)
+                cv2.imshow(window, canvas)
+
+            # --- 5b. 버튼 클릭 ---
+            # 키와 같은 명령 dict 를 만들어 같은 경로로 보낸다. 토글은
+            # 최신 텔레메트리가 아니라 지금 그린 tel 을 봐야 한다 --
+            # 눈에 보이는 상태와 뒤집는 대상이 어긋나면 안 된다.
+            clicked = router.take_click()
+            if clicked is not None:
+                cmd = dash_buttons.command(clicked.id, tel or {})
+                if cmd is not None:
+                    ctl.sendall(encode_msg(cmd))
 
             # --- 6. 키 처리 ---
             key = cv2.waitKey(1) & 0xFF
