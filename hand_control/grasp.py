@@ -152,6 +152,25 @@ class FingerGrasp:
         self._abort_cycles = 0     # 연속으로 f_abort를 넘은 사이클 수
         self._hold_floor = None    # HOLD에서 여기보다 더 못 편다
 
+    def set_object(self, object_class, f_target):
+        """손 전체의 분류 결과를 받아들인다.
+
+        물체는 하나인데 이 클래스는 손가락 하나만 안다. 그래서 집계는
+        모든 손가락 상태를 보는 러너가 하고, 결과만 이 통로로 내려온다.
+
+        CLASSIFY 가 스스로 정한 값을 덮어쓴다. 천장(_f_target_max)까지
+        같이 옮기는 것이 중요하다 -- 그러지 않으면 HOLD 의 stall 적응이
+        승격 직후 목표를 옛 천장으로 도로 깎아 승격이 무효가 된다.
+
+        아직 CLASSIFY 전이라 제어기가 없는 손가락에도 불린다. 다른
+        손가락이 먼저 프로빙을 끝냈을 때 정상적으로 생기는 경우다.
+        """
+        self.object_class = object_class
+        self.f_target = f_target
+        self._f_target_max = f_target
+        if self._controller is not None:
+            self._controller.f_target = f_target
+
     def _contact_lost(self, force, p):
         """물체가 빠졌나. 연속으로 f_touch 아래여야 인정한다.
 
@@ -322,7 +341,8 @@ class FingerGrasp:
             else:
                 self.k_hat, self.confident = stiffness.estimate_stiffness(
                     self._samples, p.k_min, p.k_max, p.probe_min_span)
-            self.object_class = stiffness.classify(self.k_hat, p.k_threshold)
+            self.object_class = stiffness.classify(self.k_hat, p.k_threshold,
+                                                   confident=self.confident)
             self.f_target = (p.f_target_rigid
                              if self.object_class == "rigid"
                              else p.f_target_soft)

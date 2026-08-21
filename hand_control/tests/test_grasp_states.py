@@ -486,6 +486,13 @@ class Test뒤늦게_들어온_물체:
     def test_복귀할_때_프로빙을_건너뛴다(self):
         # 이미 a_max 라 계단을 밟을 여유가 없다. 표본 없이 CLASSIFY 로
         # 가므로 가장 보수적인 k_max 를 쓰고 confident 는 False 다.
+        #
+        # k_max 가 '보수적'인 것은 제어 게인 쪽 이야기다 -- Δa = λ·e/k_hat
+        # 의 분모가 커져서 조금씩 움직인다. 파지력까지 세게 가라는 뜻이
+        # 아니므로 분류는 soft 다(2026-08-21). 예전에는 여기가 rigid 였는데,
+        # K_THRESHOLD 가 None 이라 어차피 목표힘이 안 갈렸을 때의 이야기다.
+        # 임계값을 정한 뒤로는 "아무것도 못 쟀는데 더 세게 쥔다"가 되어
+        # 규약("모르면 약한 쪽")과 정면으로 어긋난다.
         f = make(a_rate=1.0, a_max=0.5, touch_confirm_cycles=1,
                  k_max=500.0, k_threshold=10.0)
         now = self._to_no_contact(f)
@@ -493,7 +500,7 @@ class Test뒤늦게_들어온_물체:
         assert f.state == grasp.HOLD
         assert f.k_hat == pytest.approx(500.0)
         assert f.confident is False
-        assert f.object_class == "rigid"
+        assert f.object_class == "soft"
 
     def test_복귀_직후에도_a는_a_max를_안_넘는다(self):
         f = make(a_rate=1.0, a_max=0.5, touch_confirm_cycles=1,
@@ -716,3 +723,108 @@ class TestKFixed:
         f.update(0.9, 0.5, now=2.0, dt=0.05)
         assert f.state == grasp.HOLD
         assert f.k_hat == pytest.approx(3.9)
+
+
+class Test손_전체_판정_받아들이기:
+    """손 단위 분류 결과를 손가락에 밀어 넣는다.
+
+    물체는 하나인데 지금까지는 손가락마다 따로 분류했다. 집계는 손
+    전체를 보는 러너가 하고(grasp.py 는 손가락 하나짜리 순수 로직이라
+    다른 손가락을 모른다), 그 결과를 이 통로로 받는다.
+    """
+
+    def _to_hold(self, f, k_true=2.0, a_contact=0.04):
+        now, dt = 0.0, 0.05
+        for _ in range(300):
+            flex = max(0.0, (f.a - a_contact)) * FLEX_SPAN
+            f.update(0.5 + k_true * flex, flex, now, dt)
+            now += dt
+            if f.state in (grasp.HOLD, grasp.BACKOFF):
+                break
+
+    def test_분류와_목표힘이_바뀐다(self):
+        f = make(k_threshold=10.0, f_target_soft=1.2, f_target_rigid=1.8)
+        self._to_hold(f, k_true=2.0)
+        assert f.object_class == "soft"
+
+        f.set_object("rigid", 1.8)
+
+        assert f.object_class == "rigid"
+        assert f.f_target == pytest.approx(1.8)
+
+    def test_힘_제어기에도_반영된다(self):
+        # 이게 없으면 f_target 만 바뀌고 제어기는 옛 목표를 계속 쫓는다.
+        f = make(k_threshold=10.0, f_target_soft=1.2, f_target_rigid=1.8)
+        self._to_hold(f, k_true=2.0)
+
+        f.set_object("rigid", 1.8)
+
+        assert f._controller.f_target == pytest.approx(1.8)
+
+    def test_목표_천장도_같이_올라간다(self):
+        # _f_target_max 는 stall 적응이 목표를 낮출 때의 상한이다.
+        # 같이 올리지 않으면 승격 직후 stall 한 번에 다시 1.2 로
+        # 깎여서 승격이 무효가 된다.
+        f = make(k_threshold=10.0, f_target_soft=1.2, f_target_rigid=1.8)
+        self._to_hold(f, k_true=2.0)
+
+        f.set_object("rigid", 1.8)
+
+        assert f._f_target_max == pytest.approx(1.8)
+
+    def test_아직_제어기가_없어도_안_터진다(self):
+        # APPROACH/PROBE 중인 손가락에도 손 전체 판정이 내려온다.
+        # 다른 손가락이 먼저 CLASSIFY 를 끝냈을 때 정상적으로 생긴다.
+        f = make(f_target_soft=1.2, f_target_rigid=1.8)
+        assert f.state == grasp.APPROACH
+
+        f.set_object("rigid", 1.8)
+
+        assert f.object_class == "rigid"
+        assert f.f_target == pytest.approx(1.8)
+
+
+class Test측정_실패는_강체_증거가_아니다:
+    """estimate_stiffness 는 실패 시 (k_max, False) 를 돌려준다.
+
+    k_max 는 "가장 보수적인 분모"라는 뜻이지 "아주 단단하다"는 뜻이
+    아니다. 그 값을 그대로 classify 에 넣으면 어떤 임계값이든 넘어서
+    항상 rigid 가 된다.
+
+    K_THRESHOLD 가 None 이던 동안에는 classify 가 무조건 soft 를
+    돌려줘서 이 경로가 가려져 있었다. 임계값을 정하는 순간 드러난다.
+
+    그리고 이 실패는 실제로 강체와 무관하다 -- 2026-08-18/19 로그의
+    측정 실패 25건이 100% a=A_MAX 였다. PROBE 는 a 를 계단으로 올리며
+    재는데 a 가 이미 천장이면 5샘플이 같은 자리에서 찍힌다. '밀었는데
+    안 들어간' 게 아니라 '밀 여유가 없던' 것이다.
+    """
+
+    def test_확신이_없으면_강체로_분류하지_않는다(self):
+        # 관절이 전혀 안 움직이는 물체. k_hat 은 k_max 로 떨어진다.
+        f = make(k_threshold=50.0, f_target_soft=1.2, f_target_rigid=1.8)
+        now, dt = 0.0, 0.05
+        for _ in range(300):
+            f.update(0.5, 0.0, now, dt)
+            now += dt
+            if f.state in (grasp.HOLD, grasp.BACKOFF):
+                break
+
+        assert f.confident is False
+        assert f.k_hat == pytest.approx(f.params.k_max)
+        assert f.object_class == "soft"
+        assert f.f_target == pytest.approx(1.2)
+
+    def test_확신이_있으면_평소대로_분류한다(self):
+        # 위 보호장치가 정상 경로까지 막으면 안 된다.
+        f = make(k_threshold=10.0, f_target_soft=1.2, f_target_rigid=1.8)
+        now, dt = 0.0, 0.05
+        for _ in range(300):
+            flex = max(0.0, (f.a - 0.04)) * FLEX_SPAN
+            f.update(0.5 + 50.0 * flex, flex, now, dt)
+            now += dt
+            if f.state in (grasp.HOLD, grasp.BACKOFF):
+                break
+
+        assert f.confident is True
+        assert f.object_class == "rigid"

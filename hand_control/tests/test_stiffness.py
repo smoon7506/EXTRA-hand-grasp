@@ -116,3 +116,41 @@ class Test분류:
         # 약하게 잡으면 놓칠 뿐이다.
         assert stiffness.classify(0.5, None) == "soft"
         assert stiffness.classify(499.0, None) == "soft"
+
+
+class Test손_전체_대표강성:
+    """손가락 여러 개의 k_hat -> 손 하나의 대표값.
+
+    물체는 하나인데 손가락마다 따로 분류하던 것을 손 단위로 올린다.
+    집계가 평균이 아니라 최대인 이유: 접촉이 나쁜 손가락은 물체가
+    아니라 자기 접촉 상태를 잰다(스치듯 닿으면 많이 들어가는데 힘은
+    조금 -> 낮은 k). 강체의 증거는 "밀었는데 안 들어간다"이고 그건
+    손가락 하나만으로 성립하는 증거다. 평균을 내면 못 닿은 손가락이
+    그 증거를 희석시킨다.
+
+    2026-08-18/19 로그 실측: 같은 물체를 같이 잡은 손가락 사이의
+    k_hat 편차가 2.3배였다(한 런은 147배).
+    """
+
+    def test_confident한_것_중_최대를_고른다(self):
+        assert stiffness.hand_k([(2.0, True), (9.0, True), (5.0, True)]) == 9.0
+
+    def test_측정_실패는_무시한다(self):
+        # 가장 중요한 함정이다. estimate_stiffness 는 flex 변화폭이
+        # 모자라면 (K_MAX, False) 를 돌려준다. 그 값을 최대에 넣으면
+        # 손가락 하나만 실패해도 손 전체가 항상 K_MAX = 항상 rigid 가
+        # 된다. 게다가 실측 25건의 측정 실패가 전부 a=A_MAX 였다 --
+        # 밀었는데 안 들어간 게 아니라 애초에 밀 여유가 없던 경우라
+        # 강체 증거가 아니다.
+        assert stiffness.hand_k([(2.0, True), (500.0, False)]) == 2.0
+
+    def test_전부_실패면_모른다(self):
+        assert stiffness.hand_k([(500.0, False), (500.0, False)]) is None
+
+    def test_비어_있으면_모른다(self):
+        assert stiffness.hand_k([]) is None
+
+    def test_아직_안_잰_손가락은_건너뛴다(self):
+        # CLASSIFY 전 손가락은 k_hat 이 None 이다. 손가락마다 PROBE 가
+        # 끝나는 시점이 달라서 이 상태가 정상적으로 섞여 들어온다.
+        assert stiffness.hand_k([(None, None), (3.0, True)]) == 3.0
